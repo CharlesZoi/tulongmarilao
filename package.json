@@ -1,0 +1,14 @@
+{
+  "dependencies": {
+    "firebase": "^12.3.0"
+  },
+  "devDependencies": {
+    "clean-css": "^5.3.3",
+    "html-minifier-terser": "^7.2.0",
+    "terser": "^5.31.0"
+  },
+  "scripts": {
+    "clean:build": "node tools/clean.js",
+    "build": "npm run clean:build"
+  }
+}

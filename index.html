@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tulong Marilao</title>
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" sizes="32x32" href="icons/windows11/Square44x44Logo.targetsize-32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="icons/windows11/Square44x44Logo.targetsize-16.png">
+    <link rel="shortcut icon" href="icons/android/android-launchericon-48-48.png">
+
+    <!-- PWA Meta Tags -->
+    <meta name="description"
+        content="Public community relief map for Marilao, Bulacan. Report and track assistance needs across barangays.">
+    <meta name="theme-color" content="#2c7a3d">
+    <link rel="manifest" href="./manifest.json">
+
+    <!-- Apple Touch Icons -->
+    <link rel="apple-touch-icon" href="/icons/ios/180.png">
+    <link rel="apple-touch-icon" sizes="57x57" href="/icons/ios/57.png">
+    <link rel="apple-touch-icon" sizes="60x60" href="/icons/ios/60.png">
+    <link rel="apple-touch-icon" sizes="72x72" href="/icons/ios/72.png">
+    <link rel="apple-touch-icon" sizes="76x76" href="/icons/ios/76.png">
+    <link rel="apple-touch-icon" sizes="114x114" href="/icons/ios/114.png">
+    <link rel="apple-touch-icon" sizes="120x120" href="/icons/ios/120.png">
+    <link rel="apple-touch-icon" sizes="144x144" href="/icons/ios/144.png">
+    <link rel="apple-touch-icon" sizes="152x152" href="/icons/ios/152.png">
+    <link rel="apple-touch-icon" sizes="167x167" href="/icons/ios/167.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/180.png">
+    <link rel="apple-touch-icon" sizes="1024x1024" href="/icons/ios/1024.png">
+
+    <!-- Apple Specific Meta Tags -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Marilao Relief Map">
+
+    <!-- MS Tile -->
+    <meta name="msapplication-TileColor" content="#0f172a">
+    <meta name="msapplication-TileImage" content="/icons/windows11/Square150x150Logo.scale-100.png">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+
+    <nav class="control-panel">
+        <button type="button" id="sidebarToggle" class="sidebar-toggle" aria-label="Open menu">
+            <i class="fas fa-bars"></i>
+            <span class="sidebar-toggle-label">Menu</span>
+        </button>
+    </nav>
+
+    <main>
+        <div class="map-container">
+            <div id="map"></div>
+
+            <!-- Pinned Locations Dropdown - positioned on map -->
+            <div class="pinned-locations-dropdown">
+                <button id="viewPinnedBtn" class="btn btn-info">
+                    <i class="fas fa-list"></i> View Pinned Locations (<span id="pinnedCount">0</span>)
+                </button>
+
+                <div id="pinnedLocationsList" class="pinned-list" style="display: none;">
+                    <div class="pinned-list-header">
+                        <h4><i class="fas fa-map-pin"></i> Pinned Locations</h4>
+                        <button id="closePinnedList" class="close-btn">&times;</button>
+                    </div>
+                    <div class="pinned-list-filters">
+                        <div class="pinned-search-container">
+                            <input type="text" id="pinnedSearchInput" placeholder="Search locations..."
+                                autocomplete="off">
+                            <i class="fas fa-search pinned-search-icon"></i>
+                        </div>
+                        <div class="pinned-urgency-filters">
+                            <button class="urgency-filter active" data-urgency="all">
+                                <i class="fas fa-list"></i> All
+                            </button>
+                            <button class="urgency-filter" data-urgency="critical">
+                                <i class="fas fa-map-marker-alt"></i> Critical
+                            </button>
+                            <button class="urgency-filter" data-urgency="urgent">
+                                <i class="fas fa-map-marker-alt"></i> Urgent
+                            </button>
+                            <button class="urgency-filter" data-urgency="moderate">
+                                <i class="fas fa-map-marker-alt"></i> Moderate
+                            </button>
+                        </div>
+                    </div>
+                    <div class="pinned-list-content" id="pinnedListContent">
+                        <p class="no-pins">No locations pinned yet. Click "Report Location" to add one.</p>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <div class="sidebar-overlay" id="sidebarOverlay"></div>
+        <aside class="sidebar-panel" id="sidebarPanel" aria-hidden="true">
+            <div class="sidebar-header">
+                <h3>Dashboard</h3>
+                <button type="button" id="sidebarClose" class="sidebar-close" aria-label="Close menu">&times;</button>
+            </div>
+            <div class="sidebar-content">
+                <div class="sidebar-section">
+                    <h4>Quick Actions</h4>
+                    <button type="button" class="sidebar-action" id="sidebarReportLocation">
+                        <i class="fas fa-map-pin"></i> Report Location
+                    </button>
+                    <a class="sidebar-link" href="" rel="noopener noreferrer">
+                        <i class="fas fa-check-circle"></i> View Reached Locations
+                    </a>
+                </div>
+                <div class="sidebar-section">
+                    <h4>Access</h4>
+                    <a class="sidebar-link" href="user-login.html" target="_blank" rel="noopener noreferrer">
+                        <i class="fas fa-hand-holding-usd"></i> Responder / Donor
+                    </a>
+                </div>
+            </div>
+            <div class="sidebar-footer">
+                &copy; 2026 CivTech.ph
+            </div>
+        </aside>
+
+        <div class="info-panel-backdrop is-visible" id="infoPanelBackdrop"></div>
+        <div class="info-panel info-panel--hero" id="infoPanel">
+            <div class="info-content">
+                <!-- Desktop version (hidden on mobile) -->
+                <div class="info-desktop-only info-hero">
+                    <span class="info-eyebrow">— Powered by CivTech.ph</span>
+                    <h2 class="info-title">Tulong Marilao</h2>
+                    <p class="info-description">
+                        A WEB-BASED TRANSPARENCY FOR DISASTER RELIEF FUNDING THROUGH DONATIONS AND DISTRIBUTION IN
+                        MARILAO, BULACAN.
+                    </p>
+                    <div class="info-highlights">
+                        <div class="info-chip"><i class="fas fa-globe"></i> Public access, no login required</div>
+                        <div class="info-chip"><i class="fas fa-bolt"></i> Live updates across devices</div>
+                        <div class="info-chip"><i class="fas fa-location-arrow"></i> Pin locations in seconds</div>
+                    </div>
+                    <div class="info-actions">
+                        <button type="button" class="info-cta info-start-btn">Start Exploring</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="directions-panel" id="directionsPanel">
+            <div class="directions-header">
+                <h3><i class="fas fa-route"></i> Turn-by-Turn Directions</h3>
+                <button id="closeDirections" class="close-btn">&times;</button>
+            </div>
+            <div class="directions-content" id="directionsContent">
+                <p class="no-route">No route planned. Click "Plan Route" to get started.</p>
+            </div>
+            <div class="route-summary" id="routeSummary" style="display: none;">
+                <div class="summary-item">
+                    <i class="fas fa-road"></i>
+                    <span id="routeDistance">--</span>
+                </div>
+                <div class="summary-item">
+                    <i class="fas fa-clock"></i>
+                    <span id="routeTime">--</span>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Confirm Pin Location Modal -->
+    <div id="confirmLocationModal" class="modal confirm-location-modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-map-marker-alt"></i> Confirm Pin Location</h3>
+                <button id="closeConfirmLocationModal" class="close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p>Please confirm the pin is placed at the exact location.</p>
+                <div class="confirm-location-name" id="confirmLocationName">
+                    <i class="fas fa-location-dot"></i>
+                    <span class="confirm-location-name-text">Location: --</span>
+                </div>
+                <div class="confirm-location-summary" id="confirmLocationDetails" data-coords="">
+                    <span class="confirm-location-text">Lat: --, Lng: --</span>
+                    <button type="button" class="copy-coords-btn" id="copyConfirmCoords" title="Copy coordinates">
+                        <i class="fas fa-copy"></i>
+                    </button>
+                </div>
+
+                <div class="confirm-location-nav">
+                    <button type="button" class="waze-btn" id="confirmLocationWaze">
+                        <i class="fas fa-route"></i> View in Waze
+                    </button>
+                    <button type="button" class="google-maps-btn" id="confirmLocationGoogleMaps">
+                        <i class="fas fa-map-marked-alt"></i> Google Maps
+                    </button>
+                </div>
+
+                <div class="confirm-location-actions">
+                    <button id="confirmLocationNo" class="btn btn-secondary">
+                        <i class="fas fa-undo"></i> Choose Again
+                    </button>
+                    <button id="confirmLocationYes" class="btn btn-success">
+                        <i class="fas fa-check"></i> Yes, Continue
+                    </button>
+                </div>
+                <div class="confirm-location-preview" id="confirmLocationPreviewWrapper">
+                    <div id="confirmLocationMiniMap" class="confirm-location-preview-map"></div>
+                    <div class="confirm-location-preview-pin">
+                        <i class="fas fa-map-marker-alt"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- User Reporting Modal -->
+    <div id="reportModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-plus-circle"></i> Report Location Needing Help</h3>
+                <button id="closeReportModal" class="close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="reportForm">
+                    <div class="form-group">
+                        <label for="locationName">Location Name *</label>
+                        <input type="text" id="locationName" placeholder="e.g., Barangay Lias, Marilao" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="locationSource">Source *</label>
+                        <select id="locationSource" required>
+                            <option value="">Select source...</option>
+                            <option value="facebook">Facebook Post</option>
+                            <option value="twitter">Twitter/X</option>
+                            <option value="instagram">Instagram</option>
+                            <option value="tiktok">TikTok</option>
+                            <option value="messenger">Messenger/WhatsApp</option>
+                            <option value="news">News Report</option>
+                            <option value="personal">Personal Contact</option>
+                            <option value="other">Other</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="reliefNeeds">What help is needed? *</label>
+                        <div class="checkbox-group">
+                            <label><input type="checkbox" value="relief goods"> Relief Goods (Food, Clothing)</label>
+                            <label><input type="checkbox" value="clean water"> Clean Water</label>
+                            <label><input type="checkbox" value="drinking water"> Drinking Water</label>
+                            <label><input type="checkbox" value="volunteers"> Volunteers</label>
+                            <label><input type="checkbox" value="temporary shelter"> Temporary Shelter</label>
+                            <label><input type="checkbox" value="medical aid"> Medical Aid</label>
+                            <label><input type="checkbox" value="transportation"> Transportation</label>
+                            <label><input type="checkbox" value="other"> Other</label>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="urgencyLevel">Urgency Level *</label>
+                        <select id="urgencyLevel" required>
+                            <option value="">Select urgency...</option>
+                            <option value="critical">Critical - Immediate help needed</option>
+                            <option value="urgent">Urgent - Help needed within 24 hours</option>
+                            <option value="moderate">Moderate - Help needed within few days</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="peopleCount">Number of People Affected</label>
+                        <input type="number" id="peopleCount" min="1" step="1" inputmode="numeric"
+                            placeholder="e.g., 120">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="additionalInfo">Additional Information</label>
+                        <textarea id="additionalInfo"
+                            placeholder="Any additional details about the situation, specific needs, etc."></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="imageUpload">Attach Photos (Optional)</label>
+                        <div class="image-upload-container">
+                            <input type="file" id="imageUpload" accept="image/*" multiple style="display: none;">
+                            <button type="button" id="imageUploadBtn" class="btn btn-outline">
+                                <i class="fas fa-camera"></i> Add Photos
+                            </button>
+                            <div id="imagePreview" class="image-preview-container"></div>
+                            <div class="upload-help-text">
+                                <small><i class="fas fa-info-circle"></i> You can upload multiple photos (max 5MB
+                                    each)</small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <p class="form-section-title">Contact Person</p>
+                        <p class="form-help-text"><em>Optional for updates and follow ups purposes. We don't display
+                                your informations
+                                publicly; only donors can view your personal details.</em></p>
+                        <label for="reporterName">Name</label>
+                        <input type="text" id="reporterName" placeholder="Name or nickname">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="reporterContact">Contact</label>
+                        <input type="tel" id="reporterContact" pattern="[0-9]*" inputmode="numeric"
+                            oninput="this.value = this.value.replace(/[^0-9]/g, '');" placeholder="Phone number">
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="button" id="cancelReport" class="btn btn-secondary">Cancel</button>
+                        <button type="submit" class="btn btn-success">Submit Report</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Image Modal for full-size viewing -->
+    <div id="imageModal" class="image-modal">
+        <div class="image-modal-header">
+            <div id="imageModalDetails" class="image-modal-details">
+                <!-- Location details will be populated here -->
+            </div>
+            <button class="image-modal-close" onclick="closeImageModal()">&times;</button>
+        </div>
+        <div class="image-modal-content">
+            <div class="image-modal-image-container">
+                <img id="modalImage" src="" alt="Full size image">
+            </div>
+        </div>
+    </div>
+
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <!-- Firebase SDK -->
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js';
+        import { getFirestore } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js';
+        import { getAuth } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-auth.js';
+        import { firebaseConfig } from './firebase-config.js';
+        import { firebaseChatConfig } from './firebase-chat-config.js';
+
+        // Initialize Main Firebase (for relief map data and authentication)
+        try {
+            const app = initializeApp(firebaseConfig);
+            const db = getFirestore(app);
+            const auth = getAuth(app);
+
+            // Make Main Firebase available globally
+            window.firebaseApp = app;
+            window.firestoreDb = db;
+            window.firebaseAuth = auth;
+
+            console.log('Firebase SDK loaded successfully');
+        } catch (error) {
+            console.warn('Firebase initialization failed:', error);
+            console.warn('App will fall back to localStorage');
+        }
+
+        // Initialize Chat Firebase (for chat messages only)
+        try {
+            const chatApp = initializeApp(firebaseChatConfig, 'chat');
+            const chatDb = getFirestore(chatApp);
+            const chatAuth = getAuth(chatApp);
+
+            // Make Chat Firebase available globally
+            window.firebaseChatApp = chatApp;
+            window.firestoreChatDb = chatDb;
+            window.firebaseChatAuth = chatAuth;
+
+            console.log('Chat Firebase SDK loaded successfully');
+        } catch (error) {
+            console.warn('Chat Firebase initialization failed:', error);
+            console.warn('Chat functionality will be disabled');
+        }
+    </script>
+
+    <script src="script_clean.js"></script>
+
+    <footer>
+        <div class="footer-content">
+            <h1><i class="fas fa-map"></i> Marilao Bulacan Community Relief Map</h1>
+            <p>Public Community Map - Anyone can view and report relief locations | Real-time sync across all devices
+            </p>
+            <p>Helping relief efforts reach affected communities across Marilao and neighboring Bulacan towns</p>
+        </div>
+    </footer>
+
+    <!-- Service Worker Registration for PWA -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./service-worker.js')
+                    .then((registration) => {
+                        console.log('Service Worker registered successfully:', registration.scope);
+
+                        // Check for updates periodically
+                        setInterval(() => {
+                            registration.update();
+                        }, 60000); // Check every minute
+                    })
+                    .catch((error) => {
+                        console.error('Service Worker registration failed:', error);
+                    });
+            });
+
+            // Handle service worker updates
+            navigator.serviceWorker.addEventListener('controllerchange', () => {
+                console.log('Service Worker updated, reloading page...');
+                window.location.reload();
+            });
+        }
+    </script>
+</body>
+
+</html>

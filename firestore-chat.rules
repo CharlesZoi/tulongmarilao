@@ -1,0 +1,75 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isMasterAdmin() {
+      return request.auth != null &&
+             request.auth.token.email in [
+               'louisejane1007@gmail.com'
+             ];
+    }
+
+    match /relief-locations/{locationId} {
+      allow read: if true;
+
+      allow create: if (
+        (request.auth != null &&
+          (request.resource.data.createdBy == request.auth.uid ||
+           request.resource.data.userId == request.auth.uid)) ||
+        (request.auth == null &&
+          (request.resource.data.createdBy is string ||
+           request.resource.data.userId is string))
+      ) &&
+        request.resource.data.name is string &&
+        request.resource.data.coords is list &&
+        request.resource.data.urgencyLevel in ['critical', 'urgent', 'moderate'] &&
+        request.resource.data.reliefNeeds is list &&
+        request.resource.data.source is string;
+
+      allow update: if isMasterAdmin() ||
+        (request.auth != null &&
+          (resource.data.createdBy == request.auth.uid ||
+           resource.data.userId == request.auth.uid)) ||
+        (request.auth == null &&
+          (resource.data.createdBy is string ||
+           resource.data.userId is string));
+
+      allow delete: if isMasterAdmin() ||
+        (request.auth != null &&
+          (resource.data.createdBy == request.auth.uid ||
+           resource.data.userId == request.auth.uid)) ||
+        (request.auth == null &&
+          (resource.data.createdBy is string ||
+           resource.data.userId is string));
+    }
+
+    match /location-chats/{messageId} {
+      allow read: if true;
+
+      allow create: if request.auth != null &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.locationId is string &&
+        request.resource.data.message is string &&
+        request.resource.data.userName is string &&
+        request.resource.data.userType is string;
+
+      allow delete: if isMasterAdmin() ||
+        (request.auth != null &&
+         resource.data.userId == request.auth.uid &&
+         resource.data.userType == 'Reporter');
+
+      allow update: if false;
+    }
+  }
+}
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read: if true;
+      allow write: if request.auth != null &&
+        request.resource.size < 5 * 1024 * 1024 &&
+        request.resource.contentType.matches('image/.*');
+    }
+  }
+}

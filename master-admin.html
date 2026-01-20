@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Master Admin Panel - Northern Cebu Relief Map</title>
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" sizes="32x32" href="icons/windows11/Square44x44Logo.targetsize-32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="icons/windows11/Square44x44Logo.targetsize-16.png">
+    <link rel="shortcut icon" href="icons/android/android-launchericon-48-48.png">
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="admin-styles.css">
+</head>
+
+<body class="admin-page">
+    <!-- Login Screen -->
+    <div id="loginScreen" class="login-screen">
+        <div class="login-container">
+            <div class="login-header">
+                <img class="admin-logo admin-logo--lg" src="icons/windows11/Square44x44Logo.targetsize-32.png"
+                    alt="Crowdpin logo">
+                <h2>Master Admin Panel</h2>
+                <p>Northern Cebu Relief Map</p>
+            </div>
+            <form id="loginForm" class="login-form">
+                <div class="form-group">
+                    <label for="adminEmail">
+                        <i class="fas fa-envelope"></i> Email
+                    </label>
+                    <input type="email" id="adminEmail" placeholder="admin@example.com" required autocomplete="email">
+                </div>
+                <div class="form-group">
+                    <label for="adminPassword">
+                        <i class="fas fa-lock"></i> Password
+                    </label>
+                    <div class="password-input-wrapper">
+                        <input type="password" id="adminPassword" placeholder="Enter password" required
+                            autocomplete="current-password">
+                        <button type="button" class="password-toggle" onclick="togglePassword('adminPassword', this)">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                    </div>
+                </div>
+                <div id="loginError" class="error-message" style="display: none;"></div>
+                <button type="submit" class="btn btn-primary btn-block">
+                    <i class="fas fa-sign-in-alt"></i> Login
+                </button>
+            </form>
+            <div class="login-footer">
+                <a href="index.html" class="btn btn-secondary btn-sm">
+                    <i class="fas fa-arrow-left"></i> Back to Map
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Admin Dashboard -->
+    <div id="adminDashboard" class="admin-dashboard" style="display: none;">
+        <!-- Header -->
+        <nav class="admin-header">
+            <div class="admin-header-left">
+                <h1>
+                    <img class="admin-logo admin-logo--md" src="icons/windows11/Square44x44Logo.targetsize-32.png"
+                        alt="Crowdpin logo">
+                    Master Admin Panel
+                </h1>
+                <span class="admin-subtitle">Full Relief Map Management</span>
+            </div>
+            <div class="admin-header-right">
+                <div class="admin-user-info">
+                    <i class="fas fa-user-shield"></i>
+                    <span id="adminUserEmail">admin@example.com</span>
+                </div>
+                <button id="logoutBtn" class="btn btn-secondary btn-sm">
+                    <i class="fas fa-sign-out-alt"></i> Logout
+                </button>
+                <a href="admin-map.html" id="viewMapBtn" class="btn btn-info btn-sm"
+                    title="View admin map with master admin privileges">
+                    <i class="fas fa-map"></i> Admin Map
+                </a>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <div class="admin-content">
+            <!-- Stats Cards -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon critical">
+                        <i class="fas fa-exclamation-triangle"></i>
+                    </div>
+                    <div class="stat-info">
+                        <h3 id="criticalCount">0</h3>
+                        <p>Critical Reports</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon urgent">
+                        <i class="fas fa-exclamation-circle"></i>
+                    </div>
+                    <div class="stat-info">
+                        <h3 id="urgentCount">0</h3>
+                        <p>Urgent Reports</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon moderate">
+                        <i class="fas fa-info-circle"></i>
+                    </div>
+                    <div class="stat-info">
+                        <h3 id="moderateCount">0</h3>
+                        <p>Moderate Reports</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon total">
+                        <i class="fas fa-map-pin"></i>
+                    </div>
+                    <div class="stat-info">
+                        <h3 id="totalCount">0</h3>
+                        <p>Total Locations</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Admin Map Access Info -->
+            <div class="info-box"
+                style="background: #fff3cd; border-left: 4px solid #ffd700; padding: 1rem; border-radius: 6px; margin-bottom: 1.5rem;">
+                <div style="display: flex; align-items: center; gap: 0.75rem;">
+                    <img class="admin-logo admin-logo--sm" src="icons/windows11/Square44x44Logo.targetsize-32.png"
+                        alt="Crowdpin logo">
+                    <div>
+                        <strong style="color: #856404;">Master Admin Access</strong>
+                        <p style="margin: 0.25rem 0 0 0; color: #333; font-size: 0.9rem;">
+                            You have full privileges to delete ANY pin and manage ALL locations. Click <strong>"Admin
+                                Map"</strong> to access the admin map with master admin delete capabilities.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Filters and Search -->
+            <div class="admin-controls">
+                <div class="search-container">
+                    <i class="fas fa-search"></i>
+                    <input type="text" id="searchPins" placeholder="Search by location name, source, or reporter...">
+                </div>
+                <div class="filter-container">
+                    <label><i class="fas fa-filter"></i> Filter by Urgency:</label>
+                    <select id="urgencyFilter">
+                        <option value="all">All Urgency Levels</option>
+                        <option value="critical">Critical</option>
+                        <option value="urgent">Urgent</option>
+                        <option value="moderate">Moderate</option>
+                    </select>
+                </div>
+                <div class="filter-container">
+                    <label><i class="fas fa-check-circle"></i> Filter by Status:</label>
+                    <select id="reachedFilter">
+                        <option value="all">All Locations</option>
+                        <option value="reached">Reached Only</option>
+                        <option value="not-reached">Not Reached Only</option>
+                    </select>
+                </div>
+                <div class="filter-container">
+                    <label><i class="fas fa-sort"></i> Sort by:</label>
+                    <select id="sortBy">
+                        <option value="date-desc">Newest First</option>
+                        <option value="date-asc">Oldest First</option>
+                        <option value="urgency">Urgency Level</option>
+                        <option value="name">Location Name</option>
+                    </select>
+                </div>
+                <button id="refreshBtn" class="btn btn-info btn-sm">
+                    <i class="fas fa-sync-alt"></i> Refresh
+                </button>
+                <button id="downloadExcelBtn" class="btn btn-success btn-sm">
+                    <i class="fas fa-file-excel"></i> Download Excel
+                </button>
+                <button id="importExcelBtn" class="btn btn-primary btn-sm"
+                    title="Import relief locations from Excel (.xlsx, .xls) or JSON (.json) files. Excel requires Location Name, Latitude, and Longitude columns. JSON should be an array of location objects.">
+                    <i class="fas fa-file-upload"></i> Import Data
+                </button>
+                <button id="undoImportBtn" class="btn btn-warning btn-sm" style="display: none;"
+                    title="Undo the last data import">
+                    <i class="fas fa-undo"></i> Undo Last Import
+                </button>
+                <input type="file" id="excelFileInput" accept=".xlsx,.xls,.json" style="display: none;">
+            </div>
+
+            <!-- Pins Table -->
+            <div class="pins-table-container">
+                <table class="pins-table">
+                    <thead>
+                        <tr>
+                            <th>Location</th>
+                            <th>Urgency</th>
+                            <th>Source</th>
+                            <th>Relief Needs</th>
+                            <th>Reporter</th>
+                            <th>Date</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="pinsTableBody">
+                        <tr>
+                            <td colspan="7" class="loading-row">
+                                <i class="fas fa-spinner fa-spin"></i> Loading pins...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Empty State -->
+            <div id="emptyState" class="empty-state" style="display: none;">
+                <i class="fas fa-inbox"></i>
+                <h3>No pins found</h3>
+                <p>There are no reported locations matching your filters.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div id="deleteModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-exclamation-triangle"></i> Confirm Deletion</h3>
+                <button id="closeDeleteModal" class="close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p><strong>Are you sure you want to delete this pin?</strong></p>
+                <div id="deleteLocationInfo" class="delete-info"></div>
+                <p class="warning-text">
+                    <i class="fas fa-info-circle"></i> This action cannot be undone and will remove the pin from all
+                    devices.
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button id="cancelDelete" class="btn btn-secondary">Cancel</button>
+                <button id="confirmDelete" class="btn btn-danger">
+                    <i class="fas fa-trash"></i> Delete Pin
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- View Details Modal -->
+    <div id="detailsModal" class="modal" style="display: none;">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h3><i class="fas fa-info-circle"></i> Location Details</h3>
+                <button id="closeDetailsModal" class="close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="locationDetails"></div>
+            </div>
+            <div class="modal-footer">
+                <button id="closeDetailsBtn" class="btn btn-secondary">Close</button>
+                <button id="viewOnMapBtn" class="btn btn-info">
+                    <i class="fas fa-map-marker-alt"></i> View on Map
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Team Name Modal -->
+    <div id="teamNameModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header" style="background: #28a745; color: white;">
+                <h3><i class="fas fa-users"></i> Response Team</h3>
+                <button id="closeTeamModal" class="close-btn" style="color: white;">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="margin-bottom: 1rem; color: #666;">
+                    <i class="fas fa-info-circle"></i> Enter your response team name to mark this location as reached.
+                </p>
+                <div class="form-group">
+                    <label for="teamNameInput" style="font-weight: 600; margin-bottom: 0.5rem; display: block;">
+                        <i class="fas fa-user-friends"></i> Team Name:
+                    </label>
+                    <input type="text" id="teamNameInput" class="form-control" placeholder="e.g., Red Cross Team Alpha"
+                        style="width: 100%; padding: 0.75rem; border: 2px solid #e0e0e0; border-radius: 6px; font-size: 1rem;">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="cancelTeamName" class="btn btn-secondary">Cancel</button>
+                <button id="confirmTeamName" class="btn" style="background: #28a745; color: white;">
+                    <i class="fas fa-check"></i> Mark as Reached
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- SheetJS Library for Excel Export -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+
+    <!-- Firebase SDK -->
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js';
+        import { getFirestore } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js';
+        import { getAuth } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-auth.js';
+        import { firebaseConfig } from './firebase-config.js';
+
+        // Initialize Firebase
+        try {
+            const app = initializeApp(firebaseConfig, 'master-admin');
+            const db = getFirestore(app);
+            const auth = getAuth(app);
+
+            // Make Firebase available globally
+            window.firebaseApp = app;
+            window.firestoreDb = db;
+            window.firebaseAuth = auth;
+
+            console.log('Firebase SDK loaded successfully');
+        } catch (error) {
+            console.error('Firebase initialization failed:', error);
+            alert('Failed to connect to database. Please check your internet connection.');
+        }
+    </script>
+
+    <!-- Password Toggle Script -->
+    <script>
+        function togglePassword(inputId, button) {
+            const input = document.getElementById(inputId);
+            const icon = button.querySelector('i');
+
+            if (input.type === 'password') {
+                input.type = 'text';
+                icon.classList.remove('fa-eye');
+                icon.classList.add('fa-eye-slash');
+            } else {
+                input.type = 'password';
+                icon.classList.remove('fa-eye-slash');
+                icon.classList.add('fa-eye');
+            }
+        }
+    </script>
+
+    <script type="module" src="security.js"></script>
+    <script src="master-admin.js"></script>
+</body>
+
+</html>
