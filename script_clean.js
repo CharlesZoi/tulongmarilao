@@ -213,10 +213,7 @@ function initFirebase() {
         updateSyncStatus('online', 'Public Server Online');
 
         // Check if this is admin map
-        if (window.isAdminMap) {
-            // Admin map - authentication already handled in admin-map.html
-            window.isAdminAuthenticated = true;
-        } else {
+        if (!window.isAdminMap) {
             // Public map - no delete privileges
             window.isAdminAuthenticated = false;
         }
@@ -406,7 +403,10 @@ async function setupRealtimeListener() {
                     data.firestoreId = change.doc.id;
 
                     // Check if this location is already in our local array
-                    const exists = userReportedLocations.find(loc => loc.firestoreId === data.firestoreId);
+                    const exists = userReportedLocations.some(loc =>
+                        (loc.firestoreId && loc.firestoreId === data.firestoreId) ||
+                        (loc.id && data.id && loc.id === data.id)
+                    );
                     if (!exists) {
                         userReportedLocations.push(data);
                         markerUpdateQueue.push({ type: 'add', data: data });
@@ -2848,8 +2848,15 @@ async function submitLocationReport(e) {
             userReport.firestoreId = savedId;
         }
 
-        userReportedLocations.push(userReport);
-        addUserReportedMarker(userReport);
+        const alreadyTracked = userReportedLocations.some(location =>
+            (userReport.firestoreId && location.firestoreId === userReport.firestoreId) ||
+            (userReport.id && location.id === userReport.id)
+        );
+
+        if (!alreadyTracked) {
+            userReportedLocations.push(userReport);
+            addUserReportedMarker(userReport);
+        }
 
         // Update localStorage as backup
         localStorage.setItem('userReportedLocations', JSON.stringify(userReportedLocations));
@@ -2929,19 +2936,31 @@ function createUserReportPopup(report) {
         currentUserId = localStorage.getItem('anonymousSessionId');
     }
 
-    // Users can delete their own pins only (master admin features removed from index.html)
-    if (currentUserId && report.userId && report.userId === currentUserId) {
+    const masterAdminEmails = ['louisejane1007@gmail.com'];
+    const adminEmail = (
+        (window.adminUser && window.adminUser.email) ||
+        (window.firebaseAuth && window.firebaseAuth.currentUser && window.firebaseAuth.currentUser.email) ||
+        ''
+    ).toLowerCase();
+    const isMasterAdmin = window.isAdminMap && masterAdminEmails.includes(adminEmail);
+
+    // Users can delete their own pins; master admin can delete all pins on admin map
+    if (isMasterAdmin || (currentUserId && report.userId && report.userId === currentUserId)) {
         canDelete = true;
-        deleteReason = 'Your pin';
+        deleteReason = isMasterAdmin ? 'Master admin' : 'Your pin';
     }
 
     // Create appropriate action button
+    const noDeleteMessage = window.isAdminMap
+        ? 'Only master admins can remove this'
+        : 'Only the creator can remove this';
+
     const actionButton = canDelete ?
         `<button onclick="removeUserReportedLocation('${uniqueId}')" class="btn btn-danger btn-sm" title="Remove this location">
             <i class="fas fa-trash"></i> Remove
         </button>` :
         `<span class="text-muted" style="font-size: 0.8rem; padding: 0.5rem;">
-            <i class="fas fa-lock"></i> Only the creator can remove this
+            <i class="fas fa-lock"></i> ${noDeleteMessage}
         </span>`;
 
     // Check if location has been reached
@@ -3036,9 +3055,11 @@ function createUserReportPopup(report) {
                 </div>
             </div>
             
+            ${!canDelete ? `
             <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid #eee; font-size: 11px; color: #888; text-align: center; font-style: italic;">
-                Only the creator or authorized staff can remove this
+                ${noDeleteMessage}
             </div>
+            ` : ''}
         </div>
     `;
 }
