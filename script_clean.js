@@ -200,6 +200,8 @@ let isReportingMode = false;
 let pendingReportCoords = null;
 let confirmMiniMap = null;
 let confirmMiniMapMarker = null;
+let marilaoBoundsOutline = null;
+let marilaoBoundaryLayer = null;
 
 // Firebase Firestore functions
 let db = null;
@@ -228,6 +230,45 @@ function initFirebase() {
         return true;
     } else {
         updateSyncStatus('offline', 'Local only');
+        return false;
+    }
+}
+
+async function addMarilaoBoundaryLayer() {
+    if (!map) return false;
+
+    try {
+        const response = await fetch('data/marilao-boundary.geojson', { cache: 'no-store' });
+        if (!response.ok) {
+            console.warn('Marilao boundary GeoJSON not found at data/marilao-boundary.geojson');
+            return false;
+        }
+
+        const boundaryData = await response.json();
+        marilaoBoundaryLayer = L.geoJSON(boundaryData, {
+            style: {
+                color: '#f97316',
+                weight: 2,
+                fill: true,
+                fillColor: '#f97316',
+                fillOpacity: 0.25
+            },
+            interactive: false
+        }).addTo(map);
+
+        if (marilaoBoundsOutline) {
+            map.removeLayer(marilaoBoundsOutline);
+            marilaoBoundsOutline = null;
+        }
+
+        const boundaryBounds = marilaoBoundaryLayer.getBounds();
+        if (boundaryBounds.isValid() && !window.location.hash) {
+            map.fitBounds(boundaryBounds, { padding: [20, 20] });
+        }
+
+        return true;
+    } catch (error) {
+        console.warn('Failed to load Marilao boundary GeoJSON.', error);
         return false;
     }
 }
@@ -645,6 +686,14 @@ async function initMap() {
         markerZoomAnimation: true
     }).setView(MAP_DEFAULT_CENTER, 13);
 
+    const marilaoBounds = L.latLngBounds(
+        [MAP_LAND_BOUNDS.south, MAP_LAND_BOUNDS.west],
+        [MAP_LAND_BOUNDS.north, MAP_LAND_BOUNDS.east]
+    );
+
+    map.setMaxBounds(marilaoBounds);
+    map.options.maxBoundsViscosity = 1.0;
+
     // Add tile layer with performance optimizations
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap contributors',
@@ -654,6 +703,17 @@ async function initMap() {
         updateWhenZooming: false, // Don't update while zooming
         keepBuffer: 2 // Keep tiles in buffer for smoother panning
     }).addTo(map);
+
+    marilaoBoundsOutline = L.rectangle(marilaoBounds, {
+        color: '#0f766e',
+        weight: 2,
+        fill: false
+    }).addTo(map);
+
+    const boundaryLoaded = await addMarilaoBoundaryLayer();
+    if (!boundaryLoaded) {
+        map.fitBounds(marilaoBounds, { padding: [20, 20] });
+    }
 
     // Initialize layer groups - only user reported locations
     markerLayers = {
