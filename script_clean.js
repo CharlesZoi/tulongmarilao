@@ -193,6 +193,123 @@ function showCustomConfirm(message, subtitle = '') {
     });
 }
 
+// Custom confirmation dialog for chat message deletion
+function showChatDeleteConfirm() {
+    return new Promise((resolve) => {
+        const confirmModal = document.createElement('div');
+        confirmModal.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(15, 23, 42, 0.55);
+            z-index: 100002;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1.5rem;
+        `;
+
+        confirmModal.innerHTML = `
+            <div style="
+                background: #ffffff;
+                padding: 1.5rem;
+                border-radius: 14px;
+                box-shadow: 0 18px 40px rgba(15, 23, 42, 0.35);
+                max-width: 360px;
+                width: 100%;
+                text-align: left;
+            ">
+                <div style="display: flex; gap: 0.75rem; align-items: flex-start;">
+                    <div style="
+                        width: 38px;
+                        height: 38px;
+                        border-radius: 50%;
+                        background: rgba(220, 53, 69, 0.12);
+                        color: #dc3545;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        font-size: 1rem;
+                    ">
+                        <i class="fa-solid fa-trash-can"></i>
+                    </div>
+                    <div>
+                        <div style="font-size: 1.05rem; font-weight: 700; color: #1f2937; margin-bottom: 0.25rem;">
+                            Unsend this message?
+                        </div>
+                        <div style="font-size: 0.9rem; color: #6b7280; line-height: 1.4;">
+                            This action cannot be undone.
+                        </div>
+                    </div>
+                </div>
+                <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.5rem;">
+                    <button id="chatDeleteCancel" style="
+                        background: #e2e8f0;
+                        color: #334155;
+                        border: none;
+                        padding: 0.6rem 1.2rem;
+                        border-radius: 999px;
+                        cursor: pointer;
+                        font-size: 0.9rem;
+                        font-weight: 600;
+                    ">Cancel</button>
+                    <button id="chatDeleteConfirm" style="
+                        background: #dc3545;
+                        color: #ffffff;
+                        border: none;
+                        padding: 0.6rem 1.2rem;
+                        border-radius: 999px;
+                        cursor: pointer;
+                        font-size: 0.9rem;
+                        font-weight: 600;
+                        display: inline-flex;
+                        align-items: center;
+                        gap: 0.4rem;
+                        box-shadow: 0 10px 18px rgba(220, 53, 69, 0.3);
+                    "><i class="fa-solid fa-trash-can"></i> Unsend</button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(confirmModal);
+
+        const cleanup = () => {
+            if (confirmModal.parentElement) {
+                confirmModal.remove();
+            }
+            document.removeEventListener('keydown', handleEscape);
+        };
+
+        document.getElementById('chatDeleteConfirm').onclick = () => {
+            cleanup();
+            resolve(true);
+        };
+
+        document.getElementById('chatDeleteCancel').onclick = () => {
+            cleanup();
+            resolve(false);
+        };
+
+        confirmModal.onclick = (e) => {
+            if (e.target === confirmModal) {
+                cleanup();
+                resolve(false);
+            }
+        };
+
+        const handleEscape = (e) => {
+            if (e.key === 'Escape') {
+                cleanup();
+                resolve(false);
+            }
+        };
+
+        document.addEventListener('keydown', handleEscape);
+    });
+}
+
 let map;
 let markerLayers = {};
 let userReportedLocations = [];
@@ -202,6 +319,9 @@ let confirmMiniMap = null;
 let confirmMiniMapMarker = null;
 let marilaoBoundsOutline = null;
 let marilaoBoundaryLayer = null;
+let mapDefaultBounds = null;
+let activePopupLatLng = null;
+let lastZoomLevel = null;
 
 // Firebase Firestore functions
 let db = null;
@@ -262,8 +382,11 @@ async function addMarilaoBoundaryLayer() {
         }
 
         const boundaryBounds = marilaoBoundaryLayer.getBounds();
-        if (boundaryBounds.isValid() && !window.location.hash) {
-            map.fitBounds(boundaryBounds, { padding: [20, 20] });
+        if (boundaryBounds.isValid()) {
+            mapDefaultBounds = boundaryBounds;
+            if (!window.location.hash) {
+                map.fitBounds(boundaryBounds, { padding: [20, 20] });
+            }
         }
 
         return true;
@@ -552,6 +675,7 @@ function loadFromLocalStorage() {
 
 // Default map center (Marilao, Bulacan)
 const MAP_DEFAULT_CENTER = [14.7578, 120.9483];
+const MAP_DEFAULT_ZOOM = 13;
 
 // Bounding box for Marilao/Bulacan coverage
 const MAP_LAND_BOUNDS = {
@@ -684,12 +808,46 @@ async function initMap() {
         fadeAnimation: true,
         zoomAnimation: true,
         markerZoomAnimation: true
-    }).setView(MAP_DEFAULT_CENTER, 13);
+    }).setView(MAP_DEFAULT_CENTER, MAP_DEFAULT_ZOOM);
+
+    lastZoomLevel = map.getZoom();
+
+    map.on('popupopen', (event) => {
+        activePopupLatLng = event.popup.getLatLng();
+    });
+
+    map.on('popupclose', () => {
+        activePopupLatLng = null;
+    });
+
+    map.on('zoomanim', (event) => {
+        if (!activePopupLatLng || lastZoomLevel === null) return;
+
+        if (event.zoom < lastZoomLevel) {
+            map.closePopup();
+            activePopupLatLng = null;
+        }
+    });
+
+    map.on('zoomend', () => {
+        const currentZoom = map.getZoom();
+
+        if (activePopupLatLng && lastZoomLevel !== null && currentZoom < lastZoomLevel) {
+            map.closePopup();
+            activePopupLatLng = null;
+        } else {
+            recenterActivePopup();
+        }
+
+        lastZoomLevel = currentZoom;
+    });
 
     const marilaoBounds = L.latLngBounds(
         [MAP_LAND_BOUNDS.south, MAP_LAND_BOUNDS.west],
         [MAP_LAND_BOUNDS.north, MAP_LAND_BOUNDS.east]
     );
+
+    mapDefaultBounds = marilaoBounds;
 
     map.setMaxBounds(marilaoBounds);
     map.options.maxBoundsViscosity = 1.0;
@@ -733,12 +891,43 @@ async function initMap() {
     setupEventListeners();
 }
 
+function resetMapView() {
+    if (!map) return;
+
+    map.closePopup();
+    activePopupLatLng = null;
+
+    const fitOptions = {
+        padding: [20, 20],
+        animate: true,
+        duration: 0.8
+    };
+
+    map.once('moveend', () => {
+        recenterActivePopup({ duration: 0.4 });
+    });
+
+    if (mapDefaultBounds) {
+        map.fitBounds(mapDefaultBounds, fitOptions);
+    } else {
+        map.setView(MAP_DEFAULT_CENTER, MAP_DEFAULT_ZOOM, {
+            animate: true,
+            duration: 0.8
+        });
+    }
+}
+
 // Event listeners
 function setupEventListeners() {
     // Report location button
     const reportLocationBtn = document.getElementById('reportLocation');
     if (reportLocationBtn) {
         reportLocationBtn.addEventListener('click', startReportingMode);
+    }
+
+    const resetMapViewBtn = document.getElementById('resetMapView');
+    if (resetMapViewBtn) {
+        resetMapViewBtn.addEventListener('click', resetMapView);
     }
 
     // Modal event listeners
@@ -844,21 +1033,41 @@ function setupEventListeners() {
     const sidebarOverlay = document.getElementById('sidebarOverlay');
     const sidebarClose = document.getElementById('sidebarClose');
     const sidebarReportLocation = document.getElementById('sidebarReportLocation');
+    const reachedViewToggle = document.getElementById('reachedViewToggle');
+
+    const moveFocusOutsideSidebar = () => {
+        if (!sidebarPanel) {
+            return;
+        }
+        if (sidebarPanel.contains(document.activeElement)) {
+            if (sidebarToggle) {
+                sidebarToggle.focus();
+            } else if (document.activeElement instanceof HTMLElement) {
+                document.activeElement.blur();
+            }
+        }
+    };
 
     const openSidebar = () => {
         if (sidebarPanel) {
             sidebarPanel.classList.add('is-open');
             sidebarPanel.setAttribute('aria-hidden', 'false');
+            sidebarPanel.removeAttribute('inert');
         }
         if (sidebarOverlay) {
             sidebarOverlay.classList.add('is-visible');
         }
+        if (sidebarClose) {
+            sidebarClose.focus();
+        }
     };
 
     const closeSidebar = () => {
+        moveFocusOutsideSidebar();
         if (sidebarPanel) {
             sidebarPanel.classList.remove('is-open');
             sidebarPanel.setAttribute('aria-hidden', 'true');
+            sidebarPanel.setAttribute('inert', '');
         }
         if (sidebarOverlay) {
             sidebarOverlay.classList.remove('is-visible');
@@ -887,6 +1096,12 @@ function setupEventListeners() {
         sidebarReportLocation.addEventListener('click', () => {
             closeSidebar();
             startReportingMode();
+        });
+    }
+
+    if (reachedViewToggle) {
+        reachedViewToggle.addEventListener('change', (event) => {
+            setReachedViewActive(event.target.checked);
         });
     }
 
@@ -975,6 +1190,8 @@ function setupEventListeners() {
             }
         });
     }
+
+    updateReachedViewUI();
 }
 
 // Search functionality with geocoding and autocomplete
@@ -2960,7 +3177,10 @@ function addUserReportedMarker(report) {
     const matchesUrgency = currentUrgencyFilter === 'all' ||
         report.urgencyLevel === currentUrgencyFilter;
 
-    if (matchesUrgency) {
+    const isReached = report.reached === true;
+    const matchesReached = isReachedViewActive ? isReached : !isReached;
+
+    if (matchesUrgency && matchesReached) {
         addUserReportedMarkerToMap(report);
     }
 }
@@ -3023,9 +3243,31 @@ function createUserReportPopup(report) {
             <i class="fas fa-lock"></i> ${noDeleteMessage}
         </span>`;
 
-    // Check if location has been reached
+    // Check response status
     const isReached = report.reached || false;
-    const reachedBadge = isReached ? `
+    const respondingName = [
+        report.donorResponding,
+        report.respondingTeam,
+        report.responseTeam,
+        report.reachedByTeam
+    ]
+        .map(value => (value || '').toString().trim())
+        .find(value => value);
+    const responseStatusValue = (report.responseStatus || report.reliefStatus || '').toString().toLowerCase();
+    const isOnTheWay = !isReached && (
+        report.onTheWay === true ||
+        report.on_the_way === true ||
+        responseStatusValue.includes('on the way') ||
+        responseStatusValue.includes('on_the_way') ||
+        responseStatusValue.includes('on-the-way') ||
+        responseStatusValue.includes('ontheway') ||
+        responseStatusValue.includes('enroute') ||
+        responseStatusValue.includes('en route') ||
+        Boolean(respondingName)
+    );
+    const responseStatusBadge = (() => {
+        if (isReached) {
+            return `
         <div style="background: #d4edda; border-left: 4px solid #28a745; padding: 0.75rem; margin: 0.5rem 0; border-radius: 4px;">
             <p style="margin: 0; color: #155724; font-weight: 600;">
                 <i class="fas fa-check-circle"></i> Response Status: Reached
@@ -3034,7 +3276,37 @@ function createUserReportPopup(report) {
                 <strong>Team Responding:</strong> ${report.reachedByTeam}
             </p>` : ''}
         </div>
-    ` : '';
+    `;
+        }
+
+        const statusLabel = isOnTheWay ? 'On the way' : 'Unreached';
+        const statusStyles = isOnTheWay
+            ? {
+                background: '#fff3cd',
+                border: '#ffc107',
+                text: '#856404',
+                icon: 'fa-route',
+                donor: respondingName || 'Unassigned'
+            }
+            : {
+                background: '#f8f9fa',
+                border: '#6c757d',
+                text: '#495057',
+                icon: 'fa-clock',
+                donor: 'None yet'
+            };
+
+        return `
+        <div style="background: ${statusStyles.background}; border-left: 4px solid ${statusStyles.border}; padding: 0.75rem; margin: 0.5rem 0; border-radius: 4px;">
+            <p style="margin: 0; color: ${statusStyles.text}; font-weight: 600;">
+                <i class="fas ${statusStyles.icon}"></i> Response Status: ${statusLabel}
+            </p>
+            <p style="margin: 0.25rem 0 0 0; color: ${statusStyles.text}; font-size: 0.9rem;">
+                <strong>Donor Responding:</strong> ${statusStyles.donor}
+            </p>
+        </div>
+    `;
+    })();
 
     // Initialize chat when popup is created
     setTimeout(() => {
@@ -3059,7 +3331,7 @@ function createUserReportPopup(report) {
             </div>
             
             <div class="popup-body">
-                ${reachedBadge}
+                ${responseStatusBadge}
                 <div class="popup-badges">
                     ${sourceBadge} ${urgencyBadge}
                 </div>
@@ -3084,7 +3356,7 @@ function createUserReportPopup(report) {
             <div id="chatSection-${uniqueId}" class="chat-section" style="margin-top: 15px; border-top: 1px solid #ddd; padding-top: 15px;">
                 <div class="chat-header" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
                     <h5 style="margin: 0; color: #333; font-size: 14px;">
-                        <i class="fas fa-comments" style="color: #007bff; margin-right: 5px;"></i> Chat
+                        <i class="fas fa-comments" style="color: #007bff; margin-right: 5px;"></i> Relief Thread
                     </h5>
                     <button onclick="toggleChat('${uniqueId}')" class="btn-chat-toggle" style="background: none; border: none; color: #666; cursor: pointer; padding: 5px;">
                         <i class="fas fa-chevron-down" id="chatToggle-${uniqueId}"></i>
@@ -3277,6 +3549,7 @@ function hidePinnedLocationsList() {
         // Hide after animation completes
         setTimeout(() => {
             pinnedList.style.display = 'none';
+            refreshMapMarkers();
         }, 300);
     });
 }
@@ -3284,6 +3557,63 @@ function hidePinnedLocationsList() {
 // Global variables for filtering
 let currentSearchQuery = '';
 let currentUrgencyFilter = 'all';
+let isReachedViewActive = false;
+
+function getReachedLocations() {
+    return userReportedLocations.filter(location => location.reached);
+}
+
+function getUnreachedLocations() {
+    return userReportedLocations.filter(location => !location.reached);
+}
+
+function getLocationsForView() {
+    return isReachedViewActive ? getReachedLocations() : getUnreachedLocations();
+}
+
+function setReachedViewActive(isActive) {
+    isReachedViewActive = Boolean(isActive);
+    updateReachedViewUI();
+
+    const pinnedList = document.getElementById('pinnedLocationsList');
+    if (!pinnedList || pinnedList.style.display !== 'block') {
+        refreshMapMarkers();
+    }
+
+    updatePinnedLocationsList();
+}
+
+function updateReachedViewUI() {
+    const viewPinnedLabel = document.getElementById('viewPinnedLabel');
+    const viewPinnedIcon = document.getElementById('viewPinnedIcon');
+    const pinnedListTitle = document.getElementById('pinnedListTitle');
+    const pinnedListIcon = document.getElementById('pinnedListIcon');
+    const reachedToggle = document.getElementById('reachedViewToggle');
+
+    if (reachedToggle && reachedToggle.checked !== isReachedViewActive) {
+        reachedToggle.checked = isReachedViewActive;
+    }
+
+    const labelText = isReachedViewActive ? 'View Reached Locations' : 'View Unreached Locations';
+    const titleText = isReachedViewActive ? 'Reached Locations' : 'Unreached Locations';
+    const iconClass = isReachedViewActive ? 'fa-check-circle' : 'fa-map-pin';
+    const removeClass = isReachedViewActive ? 'fa-map-pin' : 'fa-check-circle';
+
+    if (viewPinnedLabel) {
+        viewPinnedLabel.textContent = labelText;
+    }
+    if (pinnedListTitle) {
+        pinnedListTitle.textContent = titleText;
+    }
+    if (viewPinnedIcon) {
+        viewPinnedIcon.classList.remove(removeClass);
+        viewPinnedIcon.classList.add(iconClass);
+    }
+    if (pinnedListIcon) {
+        pinnedListIcon.classList.remove(removeClass);
+        pinnedListIcon.classList.add(iconClass);
+    }
+}
 
 // Search state management
 let isSearching = false;
@@ -3300,13 +3630,15 @@ function updatePinnedLocationsList() {
     const pinnedCount = document.getElementById('pinnedCount');
     const pinnedList = document.getElementById('pinnedLocationsList');
 
+    const locationsForView = getLocationsForView();
+
     if (!pinnedCount && !pinnedList) {
         return;
     }
 
     // Update count
     if (pinnedCount) {
-        pinnedCount.textContent = userReportedLocations.length;
+        pinnedCount.textContent = locationsForView.length;
     }
 
     // If list is visible, refresh it with lazy loading
@@ -3345,13 +3677,15 @@ function initializePinnedLocationsList() {
 }
 
 function prepareFilteredLocations() {
-    if (userReportedLocations.length === 0) {
+    const locationsForView = getLocationsForView();
+
+    if (locationsForView.length === 0) {
         allFilteredLocations = [];
         return;
     }
 
     // Filter locations based on search and urgency
-    allFilteredLocations = userReportedLocations.filter(location => {
+    allFilteredLocations = locationsForView.filter(location => {
         // Search filter - enhanced to include location-based search
         const peopleCountMatch =
             location.peopleCount !== undefined &&
@@ -3416,9 +3750,14 @@ function loadMorePinnedLocations() {
 
         // Show no results message if first page and no items
         if (currentPage === 0) {
-            const noResultsMsg = currentSearchQuery || currentUrgencyFilter !== 'all'
-                ? 'No locations match your search criteria.'
-                : 'No locations pinned yet. Click "Report Location" to add one.';
+            const hasFilters = currentSearchQuery || currentUrgencyFilter !== 'all';
+            const noResultsMsg = isReachedViewActive
+                ? (hasFilters
+                    ? 'No reached locations match your search criteria.'
+                    : 'No reached locations yet. Pins turn green once a team confirms arrival.')
+                : (hasFilters
+                    ? 'No unreached locations match your search criteria.'
+                    : 'No unreached locations yet. Click "Report Location" to add one.');
             pinnedListContent.innerHTML = `<p class="no-pins">${noResultsMsg}</p>`;
         }
 
@@ -3592,7 +3931,7 @@ function updateMapMarkersWithFilter(filteredLocations) {
 
     // Add filtered markers back to the map
     filteredLocations.forEach(report => {
-        addUserReportedLocation(report);
+        addUserReportedMarker(report);
     });
 }
 
@@ -4253,7 +4592,7 @@ function refreshMapMarkers() {
 
     // Re-add all markers with updated data
     userReportedLocations.forEach(report => {
-        addUserReportedMarkerToMap(report);
+        addUserReportedMarker(report);
     });
 }
 
@@ -4282,11 +4621,14 @@ function addUserReportedMarkerToMap(report) {
 
     // Add click event to center popup on screen
     marker.on('click', function (e) {
+        const targetZoom = Math.max(map.getZoom(), 15);
+
         const newLatLng = centerPopupOnScreen(e.latlng, {
-            offsetMultiplier: 1.2
+            offsetMultiplier: 1.2,
+            zoom: targetZoom
         });
 
-        map.panTo(newLatLng, {
+        map.setView(newLatLng, targetZoom, {
             animate: true,
             duration: 0.5,
             easeLinearity: 0.25
@@ -4417,6 +4759,30 @@ document.addEventListener('DOMContentLoaded', async () => {
         checkUrlHash();
     }, 1000);
 });
+
+function recenterActivePopup(options = {}) {
+    if (!map || !activePopupLatLng) return;
+
+    const defaults = {
+        offsetMultiplier: 1.2,
+        animate: true,
+        duration: 0.35,
+        easeLinearity: 0.25,
+        zoom: map.getZoom()
+    };
+    const config = { ...defaults, ...options };
+
+    const newLatLng = centerPopupOnScreen(activePopupLatLng, {
+        offsetMultiplier: config.offsetMultiplier,
+        zoom: config.zoom
+    });
+
+    map.panTo(newLatLng, {
+        animate: config.animate,
+        duration: config.duration,
+        easeLinearity: config.easeLinearity
+    });
+}
 
 // Helper function to center popup on screen
 function centerPopupOnScreen(latlng, options = {}) {
@@ -4777,6 +5143,24 @@ function determineUserType(locationId, userId) {
 }
 
 /**
+ * Resolve the Firestore instance to use for chat writes/reads.
+ *
+ * Prefers the chat app when it has an authenticated user. Falls back to
+ * the main app when the user is authenticated there (master admin flow).
+ */
+function getChatFirestore() {
+    if (window.firestoreChatDb && window.firebaseChatAuth && window.firebaseChatAuth.currentUser) {
+        return window.firestoreChatDb;
+    }
+
+    if (window.firestoreDb && window.firebaseAuth && window.firebaseAuth.currentUser) {
+        return window.firestoreDb;
+    }
+
+    return window.firestoreChatDb || window.firestoreDb || null;
+}
+
+/**
  * Save chat message to Chat Firebase (authenticated users only)
  * 
  * @param {Object} messageData - Message object containing:
@@ -4799,7 +5183,8 @@ function determineUserType(locationId, userId) {
  * @throws {Error} If Chat Firebase not initialized or save fails
  */
 async function saveChatMessage(messageData) {
-    if (!window.firestoreChatDb) {
+    const chatDb = getChatFirestore();
+    if (!chatDb) {
         console.error('Chat Firebase database not initialized');
         throw new Error('Database not available. Please refresh the page and try again.');
     }
@@ -4813,7 +5198,7 @@ async function saveChatMessage(messageData) {
             timestamp: serverTimestamp()
         };
 
-        const docRef = await addDoc(collection(window.firestoreChatDb, 'location-chats'), messageWithTimestamp);
+        const docRef = await addDoc(collection(chatDb, 'location-chats'), messageWithTimestamp);
         console.log('Message saved to Firestore with ID:', docRef.id);
     } catch (error) {
         console.error('Error saving chat message:', error);
@@ -4842,7 +5227,7 @@ async function saveChatMessage(messageData) {
  * Firebase Query:
  * - Collection: 'location-chats' 
  * - Filter: where('locationId', '==', locationId)
- * - Order: orderBy('timestamp', 'asc')
+ * - Ordering handled client-side after fetch
  * 
  * UI Elements:
  * - Target: chatMessages-{locationId} container
@@ -4855,18 +5240,18 @@ async function loadChatMessages(locationId) {
     if (!messagesContainer) return;
 
     try {
-        if (!window.firestoreChatDb) {
+        const chatDb = getChatFirestore();
+        if (!chatDb) {
             console.error('Chat Firebase database not initialized');
             messagesContainer.innerHTML = '<div style="text-align: center; color: #666; font-size: 12px; padding: 10px;">Chat unavailable - please refresh the page</div>';
             return;
         }
 
-        const { collection, query, where, orderBy, onSnapshot } = await import('https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js');
+        const { collection, query, where, onSnapshot } = await import('https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js');
 
         const chatQuery = query(
-            collection(window.firestoreChatDb, 'location-chats'),
-            where('locationId', '==', locationId),
-            orderBy('timestamp', 'asc')
+            collection(chatDb, 'location-chats'),
+            where('locationId', '==', locationId)
         );
 
         // Clear existing messages
@@ -4996,23 +5381,23 @@ function addMessageToUI(locationId, messageData, scrollToBottom = true) {
         line-height: 1.4;
     `;
 
-    // Check if current user can delete this message (only their own messages)
+    // Check if current user can unsend this message (only their own messages)
     const currentUserId = getCurrentUserId();
-    const canDelete = (messageData.userType === 'Reporter' && messageData.userId === currentUserId);
+    const canDelete = Boolean(messageData.userId && currentUserId && messageData.userId === currentUserId);
 
     messageElement.innerHTML = `
-        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
-            <div style="display: flex; align-items: center; gap: 5px;">
-                <i class="${messageIcon}" style="color: ${messageColor}; font-size: 10px;"></i>
-                <strong style="color: ${messageColor}; font-size: 11px;">${escapeHtml(messageData.userName || 'Anonymous')}</strong>
+        <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 4px;">
+            <div style="display: flex; flex-direction: column; gap: 2px;">
+                <div style="display: flex; align-items: center; gap: 5px;">
+                    <i class="${messageIcon}" style="color: ${messageColor}; font-size: 10px;"></i>
+                    <strong style="color: ${messageColor}; font-size: 11px;">${escapeHtml(messageData.userName || 'Anonymous')}</strong>
+                </div>
+                <span style="color: #888; font-size: 10px; margin-left: 15px;">${messageTime} ${messageDate}</span>
             </div>
-            <div style="display: flex; align-items: center; gap: 8px;">
-                <span style="color: #888; font-size: 10px;">${messageTime} ${messageDate}</span>
-                ${canDelete ? `<button onclick="deleteMessage('${locationId}', '${messageData.messageId || ''}')" 
-                    style="background: none; border: none; color: #dc3545; cursor: pointer; padding: 2px; font-size: 12px; opacity: 0.7; transition: opacity 0.2s;" 
-                    onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.7'" 
-                    title="Delete message">×</button>` : ''}
-            </div>
+            ${canDelete ? `<button onclick="deleteMessage('${locationId}', '${messageData.messageId || ''}')" 
+                style="background: none; border: none; color: #dc3545; cursor: pointer; padding: 2px; font-size: 12px; opacity: 0.7; transition: opacity 0.2s;" 
+                onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.7'" 
+                title="Unsend message" aria-label="Unsend message"><i class="fa-solid fa-trash-can"></i></button>` : ''}
         </div>
         <div style="color: #333; margin-left: 15px;">${escapeHtml(messageData.message)}</div>
     `;
@@ -5093,19 +5478,21 @@ async function deleteMessage(locationId, messageId) {
     }
 
     // Confirm deletion
-    if (!confirm('Are you sure you want to delete this message? This action cannot be undone.')) {
+    const confirmed = await showChatDeleteConfirm();
+    if (!confirmed) {
         return;
     }
 
     try {
-        if (!window.firestoreChatDb) {
+        const chatDb = getChatFirestore();
+        if (!chatDb) {
             throw new Error('Chat database not available');
         }
 
         const { doc, deleteDoc } = await import('https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js');
 
         // Delete the message document
-        await deleteDoc(doc(window.firestoreChatDb, 'location-chats', messageId));
+        await deleteDoc(doc(chatDb, 'location-chats', messageId));
 
         console.log('Message deleted successfully');
 

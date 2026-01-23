@@ -452,11 +452,13 @@ function updateStats() {
     const critical = allLocations.filter(loc => loc.urgencyLevel === 'critical').length;
     const urgent = allLocations.filter(loc => loc.urgencyLevel === 'urgent').length;
     const moderate = allLocations.filter(loc => loc.urgencyLevel === 'moderate').length;
+    const reached = allLocations.filter(loc => loc.reached).length;
     const total = allLocations.length;
 
     document.getElementById('criticalCount').textContent = critical;
     document.getElementById('urgentCount').textContent = urgent;
     document.getElementById('moderateCount').textContent = moderate;
+    document.getElementById('reachedCount').textContent = reached;
     document.getElementById('totalCount').textContent = total;
 }
 
@@ -728,6 +730,94 @@ function viewDetails(firestoreId) {
 
     const detailsDiv = document.getElementById('locationDetails');
     const urgencyColor = getUrgencyColor(location.urgencyLevel);
+    const isReached = location.reached || false;
+    const respondingName = [
+        location.donorResponding,
+        location.respondingTeam,
+        location.responseTeam,
+        location.reachedByTeam
+    ]
+        .map(value => (value || '').toString().trim())
+        .find(value => value);
+    const safeRespondingName = respondingName ? escapeHtml(respondingName) : '';
+    const responseStatusValue = (location.responseStatus || location.reliefStatus || '').toString().toLowerCase();
+    const isOnTheWay = !isReached && (
+        location.onTheWay === true ||
+        location.on_the_way === true ||
+        responseStatusValue.includes('on the way') ||
+        responseStatusValue.includes('on_the_way') ||
+        responseStatusValue.includes('on-the-way') ||
+        responseStatusValue.includes('ontheway') ||
+        responseStatusValue.includes('enroute') ||
+        responseStatusValue.includes('en route') ||
+        Boolean(respondingName)
+    );
+    const responseStatusSection = (() => {
+        if (isReached) {
+            return `
+                <div class="detail-section" style="background: #d4edda; border-left: 4px solid #28a745; padding: 1rem; border-radius: 6px;">
+                    <h4><i class="fas fa-check-circle" style="color: #28a745;"></i> Response Status</h4>
+                    <div class="detail-grid">
+                        <div class="detail-item">
+                            <label>Status:</label>
+                            <span style="color: #28a745; font-weight: 600;">✓ Reached</span>
+                        </div>
+                        ${location.reachedByTeam ? `
+                            <div class="detail-item">
+                                <label>Response Team:</label>
+                                <span style="font-weight: 600;">${escapeHtml(location.reachedByTeam)}</span>
+                            </div>
+                        ` : ''}
+                        ${location.reachedBy ? `
+                            <div class="detail-item">
+                                <label>Marked By:</label>
+                                <span>${escapeHtml(location.reachedBy)}</span>
+                            </div>
+                        ` : ''}
+                        ${location.reachedAt ? `
+                            <div class="detail-item">
+                                <label>Reached At:</label>
+                                <span>${new Date(location.reachedAt).toLocaleString()}</span>
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>
+            `;
+        }
+
+        const statusLabel = isOnTheWay ? 'On the way' : 'Unreached';
+        const statusStyles = isOnTheWay
+            ? {
+                background: '#fff3cd',
+                border: '#ffc107',
+                text: '#856404',
+                icon: 'fa-route',
+                donor: safeRespondingName || 'Unassigned'
+            }
+            : {
+                background: '#f8f9fa',
+                border: '#6c757d',
+                text: '#495057',
+                icon: 'fa-clock',
+                donor: 'None yet'
+            };
+
+        return `
+                <div class="detail-section" style="background: ${statusStyles.background}; border-left: 4px solid ${statusStyles.border}; padding: 1rem; border-radius: 6px;">
+                    <h4><i class="fas ${statusStyles.icon}" style="color: ${statusStyles.text};"></i> Response Status</h4>
+                    <div class="detail-grid">
+                        <div class="detail-item">
+                            <label>Status:</label>
+                            <span style="color: ${statusStyles.text}; font-weight: 600;">${statusLabel}</span>
+                        </div>
+                        <div class="detail-item">
+                            <label>Donor Responding:</label>
+                            <span style="font-weight: 600;">${statusStyles.donor}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+    })();
 
     detailsDiv.innerHTML = `
         <div class="location-details-content">
@@ -797,35 +887,7 @@ function viewDetails(firestoreId) {
                 </div>
             </div>
 
-            ${location.reached ? `
-                <div class="detail-section" style="background: #d4edda; border-left: 4px solid #28a745; padding: 1rem; border-radius: 6px;">
-                    <h4><i class="fas fa-check-circle" style="color: #28a745;"></i> Response Status</h4>
-                    <div class="detail-grid">
-                        <div class="detail-item">
-                            <label>Status:</label>
-                            <span style="color: #28a745; font-weight: 600;">✓ Reached</span>
-                        </div>
-                        ${location.reachedByTeam ? `
-                            <div class="detail-item">
-                                <label>Response Team:</label>
-                                <span style="font-weight: 600;">${escapeHtml(location.reachedByTeam)}</span>
-                            </div>
-                        ` : ''}
-                        ${location.reachedBy ? `
-                            <div class="detail-item">
-                                <label>Marked By:</label>
-                                <span>${escapeHtml(location.reachedBy)}</span>
-                            </div>
-                        ` : ''}
-                        ${location.reachedAt ? `
-                            <div class="detail-item">
-                                <label>Reached At:</label>
-                                <span>${new Date(location.reachedAt).toLocaleString()}</span>
-                            </div>
-                        ` : ''}
-                    </div>
-                </div>
-            ` : ''}
+            ${responseStatusSection}
 
             <div class="detail-section">
                 <h4><i class="fas fa-database"></i> Database Information</h4>

@@ -1,4 +1,4 @@
-const CACHE_VERSION = '2026-01-12-01';
+const CACHE_VERSION = '2026-01-23-01';
 const CACHE_NAME = `marilao-relief-map-${CACHE_VERSION}`;
 const urlsToCache = [
   './',

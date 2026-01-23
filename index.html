@@ -52,23 +52,32 @@
             <i class="fas fa-bars"></i>
             <span class="sidebar-toggle-label">Menu</span>
         </button>
+        <button type="button" id="resetMapView" class="map-reset-btn" aria-label="Reset map view">
+            <i class="fas fa-arrows-rotate"></i>
+            <span class="map-reset-label">Reset View</span>
+        </button>
     </nav>
 
     <main>
         <div class="map-container">
             <div id="map"></div>
 
-            <!-- Pinned Locations Dropdown - positioned on map -->
+            <!-- Unreached Locations Dropdown - positioned on map -->
             <div class="pinned-locations-dropdown">
                 <button id="viewPinnedBtn" class="btn btn-info">
-                    <i class="fas fa-list"></i> View Pinned Locations (<span id="pinnedCount">0</span>)
+                    <i id="viewPinnedIcon" class="fas fa-map-pin"></i>
+                    <span id="viewPinnedLabel">View Unreached Locations</span> (<span id="pinnedCount">0</span>)
                 </button>
 
                 <div id="pinnedLocationsList" class="pinned-list" style="display: none;">
                     <div class="pinned-list-header">
-                        <h4><i class="fas fa-map-pin"></i> Pinned Locations</h4>
+                        <h4>
+                            <i id="pinnedListIcon" class="fas fa-map-pin"></i>
+                            <span id="pinnedListTitle">Unreached Locations</span>
+                        </h4>
                         <button id="closePinnedList" class="close-btn">&times;</button>
                     </div>
+
                     <div class="pinned-list-filters">
                         <div class="pinned-search-container">
                             <input type="text" id="pinnedSearchInput" placeholder="Search locations..."
@@ -110,10 +119,18 @@
                     <button type="button" class="sidebar-action" id="sidebarReportLocation">
                         <i class="fas fa-map-pin"></i> Report Location
                     </button>
-                    <a class="sidebar-link" href="" rel="noopener noreferrer">
-                        <i class="fas fa-check-circle"></i> View Reached Locations
-                    </a>
+                    <div class="sidebar-toggle-row" id="reachedViewToggleRow">
+                        <div class="sidebar-toggle-label">
+                            <i class="fas fa-check-circle"></i>
+                            <span>View Reached Locations</span>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="reachedViewToggle">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
                 </div>
+
                 <div class="sidebar-section">
                     <h4>Access</h4>
                     <a class="sidebar-link" href="user-login.html" target="_blank" rel="noopener noreferrer">

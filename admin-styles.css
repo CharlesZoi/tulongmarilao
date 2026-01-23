@@ -278,6 +278,10 @@ body:has(.admin-dashboard) {
     background: linear-gradient(135deg, #ffc107 0%, #e0a800 100%);
 }
 
+.stat-icon.reached {
+    background: linear-gradient(135deg, #28a745 0%, #218838 100%);
+}
+
 .stat-icon.total {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
 }
