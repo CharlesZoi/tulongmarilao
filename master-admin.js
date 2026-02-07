@@ -10,6 +10,9 @@ let lastImportedIds = []; // Track IDs of last imported locations for undo
 let selectedLocationForDeletion = null;
 let selectedLocationForDetails = null;
 let unsubscribeListener = null; // Firestore listener unsubscribe function
+let donationLogs = [];
+let selectedDonationLog = null;
+let donationLogsUnsubscribe = null;
 
 // Security instances
 let rateLimiter = null;
@@ -77,6 +80,7 @@ async function initAdmin() {
                 currentUser = user;
                 showDashboard();
                 await loadAllLocations();
+                await loadDonationLogs();
 
                 // Start session monitoring
                 if (sessionManager) {
@@ -116,6 +120,16 @@ function setupEventListeners() {
     document.getElementById('reachedFilter').addEventListener('change', applyFilters);
     document.getElementById('sortBy').addEventListener('change', applyFilters);
 
+    const donationSearchInput = document.getElementById('donationSearch');
+    if (donationSearchInput) {
+        donationSearchInput.addEventListener('input', renderDonationLogs);
+    }
+
+    const donationDeliveryFilter = document.getElementById('donationDeliveryFilter');
+    if (donationDeliveryFilter) {
+        donationDeliveryFilter.addEventListener('change', renderDonationLogs);
+    }
+
     // Refresh button
     document.getElementById('refreshBtn').addEventListener('click', async () => {
         const btn = document.getElementById('refreshBtn');
@@ -128,6 +142,41 @@ function setupEventListeners() {
         btn.innerHTML = originalHTML;
         btn.disabled = false;
     });
+
+    const showPinsBtn = document.getElementById('showPinsBtn');
+    if (showPinsBtn) {
+        showPinsBtn.addEventListener('click', () => setActiveSection('pins'));
+    }
+
+    const showDonationLogsBtn = document.getElementById('showDonationLogsBtn');
+    if (showDonationLogsBtn) {
+        showDonationLogsBtn.addEventListener('click', () => setActiveSection('donationLogs'));
+    }
+
+    const refreshDonationBtn = document.getElementById('refreshDonationLogs');
+    if (refreshDonationBtn) {
+        refreshDonationBtn.addEventListener('click', async () => {
+            const originalHTML = refreshDonationBtn.innerHTML;
+            refreshDonationBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Refreshing...';
+            refreshDonationBtn.disabled = true;
+
+            const donationBody = document.getElementById('donationLogsBody');
+            if (donationBody) {
+                donationBody.innerHTML = `
+                    <tr>
+                        <td colspan="7" class="loading-row">
+                            <i class="fas fa-spinner fa-spin"></i> Loading donation logs...
+                        </td>
+                    </tr>
+                `;
+            }
+
+            await loadDonationLogs();
+
+            refreshDonationBtn.innerHTML = originalHTML;
+            refreshDonationBtn.disabled = false;
+        });
+    }
 
     // Download Excel button
     document.getElementById('downloadExcelBtn').addEventListener('click', downloadExcel);
@@ -153,12 +202,44 @@ function setupEventListeners() {
     document.getElementById('closeDetailsBtn').addEventListener('click', closeDetailsModal);
     document.getElementById('viewOnMapBtn').addEventListener('click', viewOnMap);
 
+    const closeDonationModalBtn = document.getElementById('closeDonationLogModal');
+    if (closeDonationModalBtn) {
+        closeDonationModalBtn.addEventListener('click', closeDonationLogModal);
+    }
+    const approveDonationBtn = document.getElementById('approveDonationLog');
+    if (approveDonationBtn) {
+        approveDonationBtn.addEventListener('click', handleDonationLogApprove);
+    }
+    const rejectDonationBtn = document.getElementById('rejectDonationLog');
+    if (rejectDonationBtn) {
+        rejectDonationBtn.addEventListener('click', handleDonationLogReject);
+    }
+
+    // Help modal
+    const helpBtn = document.getElementById('helpBtn');
+    if (helpBtn) {
+        helpBtn.addEventListener('click', openHelpModal);
+    }
+    const closeHelpBtn = document.getElementById('closeHelpBtn');
+    if (closeHelpBtn) {
+        closeHelpBtn.addEventListener('click', closeHelpModal);
+    }
+
     // Close modals on outside click
     document.getElementById('deleteModal').addEventListener('click', (e) => {
         if (e.target.id === 'deleteModal') closeDeleteModal();
     });
     document.getElementById('detailsModal').addEventListener('click', (e) => {
         if (e.target.id === 'detailsModal') closeDetailsModal();
+    });
+    const donationLogModal = document.getElementById('donationLogModal');
+    if (donationLogModal) {
+        donationLogModal.addEventListener('click', (e) => {
+            if (e.target.id === 'donationLogModal') closeDonationLogModal();
+        });
+    }
+    document.getElementById('helpModal').addEventListener('click', (e) => {
+        if (e.target.id === 'helpModal') closeHelpModal();
     });
 }
 
@@ -284,10 +365,16 @@ async function handleLogout() {
             unsubscribeListener();
             unsubscribeListener = null;
         }
+        if (donationLogsUnsubscribe) {
+            donationLogsUnsubscribe();
+            donationLogsUnsubscribe = null;
+        }
 
         currentUser = null;
         allLocations = [];
         filteredLocations = [];
+        donationLogs = [];
+        selectedDonationLog = null;
 
         showLoginScreen();
         console.log('Logout successful');
@@ -371,6 +458,28 @@ function showDashboard() {
             }
         }
     }
+
+    setActiveSection('pins');
+}
+
+function setActiveSection(section) {
+    const pinsSection = document.getElementById('pinsSection');
+    const donationLogsSection = document.getElementById('donationLogsSection');
+    const showPinsBtn = document.getElementById('showPinsBtn');
+    const showDonationLogsBtn = document.getElementById('showDonationLogsBtn');
+
+    if (!pinsSection || !donationLogsSection || !showPinsBtn || !showDonationLogsBtn) {
+        return;
+    }
+
+    const isPins = section === 'pins';
+    pinsSection.style.display = isPins ? 'block' : 'none';
+    donationLogsSection.style.display = isPins ? 'none' : 'block';
+
+    showPinsBtn.classList.toggle('is-active', isPins);
+    showDonationLogsBtn.classList.toggle('is-active', !isPins);
+    showPinsBtn.setAttribute('aria-pressed', String(isPins));
+    showDonationLogsBtn.setAttribute('aria-pressed', String(!isPins));
 }
 
 // Load locations from local storage
@@ -420,6 +529,7 @@ async function loadAllLocations() {
                 console.log(`Loaded ${allLocations.length} locations from Firestore`);
                 updateStats();
                 applyFilters();
+                renderDonationLogs();
 
                 // If we were using local data before, show a success message
                 if (hasLocalData) {
@@ -444,6 +554,705 @@ async function loadAllLocations() {
         if (!loadLocationsFromLocalStorage()) {
             showError('Failed to load locations. Please check your connection and refresh the page.');
         }
+    }
+}
+
+// Load donation logs from Firestore
+async function loadDonationLogs() {
+    const donationLogsBody = document.getElementById('donationLogsBody');
+    const donationLogsEmpty = document.getElementById('donationLogsEmpty');
+
+    if (!donationLogsBody || !donationLogsEmpty) {
+        return;
+    }
+
+    try {
+        const { collection, onSnapshot, query, orderBy } = await import('https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js');
+
+        if (donationLogsUnsubscribe) {
+            donationLogsUnsubscribe();
+        }
+
+        const logsQuery = query(collection(db, 'donation-logs'), orderBy('submittedAt', 'desc'));
+
+        donationLogsUnsubscribe = onSnapshot(
+            logsQuery,
+            (snapshot) => {
+                donationLogs = [];
+
+                snapshot.forEach((doc) => {
+                    const data = doc.data() || {};
+                    data.firestoreId = doc.id;
+                    donationLogs.push(data);
+                });
+
+                renderDonationLogs();
+            },
+            (error) => {
+                console.error('Error loading donation logs:', error);
+                donationLogs = [];
+                renderDonationLogs();
+                showError('Failed to load donation logs. Please refresh the page.');
+            }
+        );
+    } catch (error) {
+        console.error('Error setting up donation log listener:', error);
+        donationLogs = [];
+        renderDonationLogs();
+        showError('Failed to load donation logs. Please check your connection and refresh.');
+    }
+}
+
+// Render donation logs table
+function renderDonationLogs() {
+    const donationLogsBody = document.getElementById('donationLogsBody');
+    const donationLogsEmpty = document.getElementById('donationLogsEmpty');
+
+    if (!donationLogsBody || !donationLogsEmpty) {
+        return;
+    }
+
+    if (!donationLogs.length) {
+        donationLogsBody.innerHTML = '';
+        donationLogsEmpty.style.display = 'flex';
+        return;
+    }
+
+    const searchInput = document.getElementById('donationSearch');
+    const deliveryFilter = document.getElementById('donationDeliveryFilter');
+    const searchTerm = searchInput ? searchInput.value.toLowerCase().trim() : '';
+    const deliveryFilterValue = deliveryFilter ? deliveryFilter.value : 'all';
+
+    const filteredLogs = donationLogs
+        .map((log) => ({
+            log,
+            deliveryStatus: getDonationDeliveryStatus(log)
+        }))
+        .filter(({ log, deliveryStatus }) => {
+            const matchesSearch = !searchTerm || getDonationSearchText(log).includes(searchTerm);
+            const matchesDelivery = deliveryFilterValue === 'all' ||
+                (deliveryFilterValue === 'on-the-way' && deliveryStatus.status === 'on-the-way') ||
+                (deliveryFilterValue === 'reached' && deliveryStatus.status === 'reached');
+            return matchesSearch && matchesDelivery;
+        });
+
+    if (!filteredLogs.length) {
+        donationLogsBody.innerHTML = '';
+        donationLogsEmpty.style.display = 'flex';
+        return;
+    }
+
+    donationLogsEmpty.style.display = 'none';
+
+    donationLogsBody.innerHTML = filteredLogs.map(({ log, deliveryStatus }) => {
+        const donorName = log.donorName || 'Anonymous';
+        const donorEmail = log.donorEmail ? `<br><small class="text-muted">${escapeHtml(log.donorEmail)}</small>` : '';
+        const locationName = log.location && log.location.name ? log.location.name : 'Unknown location';
+        const coords = log.location && Array.isArray(log.location.coords) ? log.location.coords : null;
+        const coordsLabel = coords && coords.length === 2 && Number.isFinite(coords[0]) && Number.isFinite(coords[1])
+            ? `<br><small class="text-muted">${coords[0].toFixed(4)}, ${coords[1].toFixed(4)}</small>`
+            : '';
+        const itemsSummary = formatDonationItemsSummary(log.items);
+        const cashLabel = formatCashAmount(log.cashAmount);
+        const submittedLabel = formatDonationDate(log.submittedAt);
+
+        return `
+            <tr data-id="${log.firestoreId}">
+                <td>
+                    <strong>${escapeHtml(donorName)}</strong>${donorEmail}
+                </td>
+                <td>
+                    <strong>${escapeHtml(locationName)}</strong>${coordsLabel}
+                </td>
+                <td>
+                    <div class="donation-items-cell">${itemsSummary}</div>
+                </td>
+                <td>${cashLabel}</td>
+                <td><small>${submittedLabel}</small></td>
+                <td>
+                    <span class="delivery-badge delivery-${deliveryStatus.status}">${deliveryStatus.label}</span>
+                </td>
+                <td class="actions-cell">
+                    <button class="btn-icon btn-info" onclick="viewDonationLog('${log.firestoreId}')" title="View Details">
+                        <i class="fas fa-eye"></i>
+                    </button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function getDonationSearchText(log) {
+    if (!log) {
+        return '';
+    }
+
+    const locationName = log.location && log.location.name ? log.location.name : '';
+    const coords = log.location && Array.isArray(log.location.coords) ? log.location.coords : null;
+    const coordsLabel = coords && coords.length === 2 && Number.isFinite(coords[0]) && Number.isFinite(coords[1])
+        ? `${coords[0].toFixed(4)}, ${coords[1].toFixed(4)}`
+        : '';
+    const itemsText = Array.isArray(log.items)
+        ? log.items.map((item) => {
+            const parts = [item.name, item.quantity, item.unit]
+                .filter(value => value !== null && value !== undefined && value !== '');
+            return parts.join(' ');
+        }).join(' ')
+        : '';
+    const searchValues = [
+        log.donorName,
+        log.donorEmail,
+        locationName,
+        coordsLabel,
+        itemsText,
+        log.notes,
+        log.cashAmount
+    ];
+
+    return searchValues
+        .filter(value => value !== null && value !== undefined && value !== '')
+        .map(value => value.toString().toLowerCase())
+        .join(' ');
+}
+
+function getDonationDeliveryStatus(log) {
+    if (!log || typeof log !== 'object') {
+        return { status: 'pending', label: 'Awaiting update' };
+    }
+
+    const normalizedStatus = [
+        log.deliveryStatus,
+        log.delivery_status,
+        log.responseStatus,
+        log.supportStatus,
+        log.support_status,
+        log.status
+    ]
+        .map(value => (value || '').toString().toLowerCase().trim())
+        .find(value => value);
+
+    const hasReached = log.reached === true || log.hasReached === true || log.isReached === true || log.delivered === true;
+    const isOnTheWay = log.onTheWay === true || log.on_the_way === true || log.isOnTheWay === true;
+
+    let status = null;
+    if (hasReached || (normalizedStatus && (normalizedStatus.includes('reach') || normalizedStatus.includes('deliver') || normalizedStatus.includes('complete')))) {
+        status = 'reached';
+    } else if (isOnTheWay || (normalizedStatus && (normalizedStatus.includes('on the way') || normalizedStatus.includes('on_the_way') || normalizedStatus.includes('on-the-way') || normalizedStatus.includes('ontheway') || normalizedStatus.includes('enroute') || normalizedStatus.includes('en route')))) {
+        status = 'on-the-way';
+    } else {
+        const locationStatus = getDonationLocationStatus(log);
+        if (locationStatus && locationStatus.isReached) {
+            status = 'reached';
+        } else if (locationStatus && locationStatus.isOnTheWay) {
+            status = 'on-the-way';
+        } else {
+            status = 'pending';
+        }
+    }
+
+    const label = status === 'reached'
+        ? 'Donations reached'
+        : status === 'on-the-way'
+            ? 'On-the-way operations'
+            : 'Awaiting update';
+
+    return { status, label };
+}
+
+function getDonationLocationStatus(log) {
+    const location = findDonationLogLocation(log);
+    if (!location) {
+        return null;
+    }
+
+    const isReached = location.reached === true;
+    const respondingName = [
+        location.donorResponding,
+        location.respondingTeam,
+        location.responseTeam,
+        location.reachedByTeam,
+        location.supportedByName,
+        location.supporterName
+    ]
+        .map(value => (value || '').toString().trim())
+        .find(value => value);
+    const responseStatusValue = (location.responseStatus || location.reliefStatus || '').toString().toLowerCase();
+    const supportStatusValue = (location.supportStatus || location.support_status || '').toString().toLowerCase();
+    const isOnTheWay = !isReached && (
+        location.onTheWay === true ||
+        location.on_the_way === true ||
+        supportStatusValue.includes('on the way') ||
+        supportStatusValue.includes('on_the_way') ||
+        supportStatusValue.includes('on-the-way') ||
+        responseStatusValue.includes('on the way') ||
+        responseStatusValue.includes('on_the_way') ||
+        responseStatusValue.includes('on-the-way') ||
+        responseStatusValue.includes('ontheway') ||
+        responseStatusValue.includes('enroute') ||
+        responseStatusValue.includes('en route') ||
+        Boolean(respondingName)
+    );
+
+    return { isReached, isOnTheWay };
+}
+
+function findDonationLogLocation(log) {
+    if (!log || !log.location || !Array.isArray(allLocations) || !allLocations.length) {
+        return null;
+    }
+
+    const locationId = log.locationId || log.location.id;
+    if (locationId) {
+        const idMatch = allLocations.find(location => location.firestoreId === locationId || location.id === locationId);
+        if (idMatch) {
+            return idMatch;
+        }
+    }
+
+    const locationName = log.location.name ? log.location.name.toString().trim().toLowerCase() : '';
+    if (locationName) {
+        const nameMatch = allLocations.find(location => location.name && location.name.toString().trim().toLowerCase() === locationName);
+        if (nameMatch) {
+            return nameMatch;
+        }
+    }
+
+    const coords = log.location.coords;
+    if (Array.isArray(coords) && coords.length === 2 && Number.isFinite(coords[0]) && Number.isFinite(coords[1])) {
+        const targetCoords = `${coords[0].toFixed(4)},${coords[1].toFixed(4)}`;
+        const coordsMatch = allLocations.find((location) => {
+            if (!Array.isArray(location.coords) || location.coords.length !== 2) {
+                return false;
+            }
+            const [lat, lng] = location.coords;
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+                return false;
+            }
+            return `${lat.toFixed(4)},${lng.toFixed(4)}` === targetCoords;
+        });
+        if (coordsMatch) {
+            return coordsMatch;
+        }
+    }
+
+    return null;
+}
+
+function formatDonationItemsSummary(items) {
+    if (!Array.isArray(items) || items.length === 0) {
+        return '<span class="text-muted">No items</span>';
+    }
+
+    const displayItems = items.slice(0, 2);
+    const renderedItems = displayItems.map((item) => {
+        const name = escapeHtml(item.name || 'Item');
+        const quantityNumber = Number(item.quantity);
+        const quantityValue = Number.isFinite(quantityNumber) ? quantityNumber : null;
+        const unit = item.unit ? escapeHtml(item.unit) : '';
+        const quantityLabel = quantityValue !== null ? `${quantityValue}${unit ? ` ${unit}` : ''}` : (unit ? unit : '');
+
+        return `
+            <div>
+                ${name}${quantityLabel ? ` <span class="text-muted">(${quantityLabel})</span>` : ''}
+            </div>
+        `;
+    }).join('');
+
+    const extraCount = items.length - displayItems.length;
+    const extraLabel = extraCount > 0 ? `<div class="text-muted">+${extraCount} more</div>` : '';
+
+    return `
+        <div class="donation-item-summary">
+            ${renderedItems}
+            ${extraLabel}
+        </div>
+    `;
+}
+
+function formatCashAmount(amount) {
+    if (amount === null || amount === undefined || amount === '') {
+        return '<span class="text-muted">—</span>';
+    }
+
+    const numericAmount = Number(amount);
+    if (!Number.isFinite(numericAmount)) {
+        return '<span class="text-muted">—</span>';
+    }
+
+    const formatted = numericAmount.toLocaleString('en-PH', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+    return `₱${formatted}`;
+}
+
+function formatDonationDate(dateValue) {
+    if (!dateValue) {
+        return 'Unknown';
+    }
+
+    if (typeof dateValue === 'object') {
+        if (typeof dateValue.toDate === 'function') {
+            const date = dateValue.toDate();
+            return date instanceof Date && !Number.isNaN(date.getTime()) ? date.toLocaleString() : 'Unknown';
+        }
+        if (typeof dateValue.seconds === 'number') {
+            const date = new Date(dateValue.seconds * 1000);
+            return Number.isNaN(date.getTime()) ? 'Unknown' : date.toLocaleString();
+        }
+    }
+
+    const date = new Date(dateValue);
+    return Number.isNaN(date.getTime()) ? 'Unknown' : date.toLocaleString();
+}
+
+function normalizeDonationStatus(status) {
+    const normalized = (status || 'pending').toString().toLowerCase();
+    if (normalized.includes('approve')) {
+        return 'approved';
+    }
+    if (normalized.includes('reject')) {
+        return 'rejected';
+    }
+    return 'pending';
+}
+
+function getDonationStatusLabel(status) {
+    switch (status) {
+        case 'approved':
+            return 'Approved';
+        case 'rejected':
+            return 'Rejected';
+        default:
+            return 'Pending';
+    }
+}
+
+function formatDonationItemsDetailed(items) {
+    if (!Array.isArray(items) || items.length === 0) {
+        return '<span class="text-muted">No items listed.</span>';
+    }
+
+    return items.map((item) => {
+        const name = escapeHtml(item.name || 'Item');
+        const numericQuantity = Number(item.quantity);
+        const hasQuantity = item.quantity !== null && item.quantity !== undefined && item.quantity !== '' && Number.isFinite(numericQuantity);
+        const unit = item.unit ? escapeHtml(item.unit) : '';
+        const quantityLabel = hasQuantity
+            ? `${numericQuantity}${unit ? ` ${unit}` : ''}`
+            : (unit ? unit : '');
+        const tagLabel = quantityLabel ? `${name} (${quantityLabel})` : name;
+
+        return `<span class="relief-need-tag">${tagLabel}</span>`;
+    }).join('');
+}
+
+function formatCashAmountValue(amount) {
+    if (amount === null || amount === undefined || amount === '') {
+        return '<span class="text-muted">No cash reported</span>';
+    }
+
+    const numericAmount = Number(amount);
+    if (!Number.isFinite(numericAmount)) {
+        return '<span class="text-muted">No cash reported</span>';
+    }
+
+    const formatted = numericAmount.toLocaleString('en-PH', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+    return `<span>₱${formatted}</span>`;
+}
+
+function renderDonationImages(images) {
+    const validImages = Array.isArray(images) ? images.filter(image => image && image.data) : [];
+
+    if (!validImages.length) {
+        return '<span class="text-muted">No photo proofs uploaded.</span>';
+    }
+
+    return `
+        <div class="donation-photo-grid">
+            ${validImages.map((image, index) => {
+        const label = image.name ? escapeHtml(image.name) : `Photo ${index + 1}`;
+        const uploadedAt = image.uploadedAt ? formatDonationDate(image.uploadedAt) : '';
+        return `
+                    <div class="donation-photo-card">
+                        <img src="${image.data}" alt="Donation proof ${index + 1}">
+                        <div class="donation-photo-meta">
+                            <span>${label}</span>
+                            ${uploadedAt ? `<small>${uploadedAt}</small>` : ''}
+                        </div>
+                    </div>
+                `;
+    }).join('')}
+        </div>
+    `;
+}
+
+function viewDonationLog(firestoreId) {
+    const log = donationLogs.find(entry => entry.firestoreId === firestoreId);
+    if (!log) {
+        return;
+    }
+
+    selectedDonationLog = log;
+    renderDonationLogDetails(log);
+
+    const modal = document.getElementById('donationLogModal');
+    if (modal) {
+        modal.style.display = 'flex';
+    }
+
+    updateDonationActionButtons(normalizeDonationStatus(log.verificationStatus));
+}
+
+function renderDonationLogDetails(log) {
+    const detailsDiv = document.getElementById('donationLogDetails');
+    if (!detailsDiv || !log) {
+        return;
+    }
+
+    const donorName = log.donorName || 'Anonymous';
+    const donorEmail = log.donorEmail ? escapeHtml(log.donorEmail) : '';
+    const donorId = log.donorId ? escapeHtml(log.donorId) : '';
+    const locationName = log.location && log.location.name ? log.location.name : 'Unknown location';
+    const locationTypeValue = log.location && log.location.type ? log.location.type : 'unknown';
+    const locationTypeLabel = locationTypeValue === 'unreached'
+        ? 'Existing location'
+        : locationTypeValue === 'supported'
+            ? 'Supported location'
+            : locationTypeValue === 'pinned'
+                ? 'Pinned on map'
+                : locationTypeValue;
+    const locationId = log.location && log.location.id ? escapeHtml(log.location.id) : '';
+    const coords = log.location && Array.isArray(log.location.coords) ? log.location.coords : null;
+    const coordsLabel = coords && coords.length === 2 && Number.isFinite(coords[0]) && Number.isFinite(coords[1])
+        ? `${coords[0].toFixed(6)}, ${coords[1].toFixed(6)}`
+        : null;
+    const status = normalizeDonationStatus(log.verificationStatus);
+    const statusLabel = getDonationStatusLabel(status);
+    const verifiedAtHtml = log.verifiedAt
+        ? `<span>${formatDonationDate(log.verifiedAt)}</span>`
+        : '<span class="text-muted">Not yet verified</span>';
+    const verifiedByHtml = log.verifiedBy
+        ? `<span>${escapeHtml(log.verifiedBy)}</span>`
+        : '<span class="text-muted">—</span>';
+    const notesHtml = log.notes
+        ? `<span>${escapeHtml(log.notes)}</span>`
+        : '<span class="text-muted">No notes provided</span>';
+
+    detailsDiv.innerHTML = `
+        <div class="location-details-content donation-log-details">
+            <div class="detail-section">
+                <h4><i class="fas fa-user"></i> Donor</h4>
+                <div class="detail-grid">
+                    <div class="detail-item">
+                        <label>Name</label>
+                        <span>${escapeHtml(donorName)}</span>
+                    </div>
+                    ${donorEmail ? `
+                        <div class="detail-item">
+                            <label>Email</label>
+                            <span>${donorEmail}</span>
+                        </div>
+                    ` : ''}
+                    ${donorId ? `
+                        <div class="detail-item">
+                            <label>Donor ID</label>
+                            <span class="text-muted" style="font-size: 0.85rem;">${donorId}</span>
+                        </div>
+                    ` : ''}
+                </div>
+            </div>
+
+            <div class="detail-section">
+                <h4><i class="fas fa-map-marker-alt"></i> Drop-off Location</h4>
+                <div class="detail-grid">
+                    <div class="detail-item">
+                        <label>Name</label>
+                        <span>${escapeHtml(locationName)}</span>
+                    </div>
+                    ${coordsLabel ? `
+                        <div class="detail-item">
+                            <label>Coordinates</label>
+                            <span>${coordsLabel}</span>
+                        </div>
+                    ` : ''}
+                    <div class="detail-item">
+                        <label>Location Type</label>
+                        <span>${escapeHtml(locationTypeLabel)}</span>
+                    </div>
+                    ${locationId ? `
+                        <div class="detail-item">
+                            <label>Location ID</label>
+                            <span class="text-muted" style="font-size: 0.85rem;">${locationId}</span>
+                        </div>
+                    ` : ''}
+                </div>
+            </div>
+
+            <div class="detail-section">
+                <h4><i class="fas fa-box-open"></i> Items Delivered</h4>
+                <div class="relief-needs-list">
+                    ${formatDonationItemsDetailed(log.items)}
+                </div>
+            </div>
+
+            <div class="detail-section">
+                <h4><i class="fas fa-coins"></i> Cash & Notes</h4>
+                <div class="detail-grid">
+                    <div class="detail-item">
+                        <label>Cash Donation</label>
+                        ${formatCashAmountValue(log.cashAmount)}
+                    </div>
+                    <div class="detail-item">
+                        <label>Notes</label>
+                        ${notesHtml}
+                    </div>
+                </div>
+            </div>
+
+            <div class="detail-section">
+                <h4><i class="fas fa-images"></i> Photo Proofs</h4>
+                ${renderDonationImages(log.images)}
+            </div>
+
+            <div class="detail-section">
+                <h4><i class="fas fa-clipboard-check"></i> Verification</h4>
+                <div class="detail-grid">
+                    <div class="detail-item">
+                        <label>Status</label>
+                        <span class="status-badge status-${status}">${statusLabel}</span>
+                    </div>
+                    <div class="detail-item">
+                        <label>Submitted At</label>
+                        <span>${formatDonationDate(log.submittedAt)}</span>
+                    </div>
+                    <div class="detail-item">
+                        <label>Verified At</label>
+                        ${verifiedAtHtml}
+                    </div>
+                    <div class="detail-item">
+                        <label>Verified By</label>
+                        ${verifiedByHtml}
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function closeDonationLogModal() {
+    const modal = document.getElementById('donationLogModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+    selectedDonationLog = null;
+}
+
+function openHelpModal() {
+    const modal = document.getElementById('helpModal');
+    if (modal) {
+        modal.style.setProperty('display', 'flex', 'important');
+    }
+}
+
+function closeHelpModal() {
+    const modal = document.getElementById('helpModal');
+    if (modal) {
+        modal.style.setProperty('display', 'none', 'important');
+    }
+}
+
+function updateDonationActionButtons(status) {
+    const approveBtn = document.getElementById('approveDonationLog');
+    const rejectBtn = document.getElementById('rejectDonationLog');
+
+    if (!approveBtn || !rejectBtn) {
+        return;
+    }
+
+    const isPending = status === 'pending';
+
+    approveBtn.disabled = !isPending;
+    rejectBtn.disabled = !isPending;
+
+    approveBtn.innerHTML = `<i class="fas fa-check"></i> ${status === 'approved' ? 'Approved' : 'Approve'}`;
+    rejectBtn.innerHTML = `<i class="fas fa-times"></i> ${status === 'rejected' ? 'Rejected' : 'Reject'}`;
+}
+
+function handleDonationLogApprove() {
+    if (!selectedDonationLog) {
+        return;
+    }
+
+    updateDonationLogStatus('approved');
+}
+
+function handleDonationLogReject() {
+    if (!selectedDonationLog) {
+        return;
+    }
+
+    const confirmed = confirm('Reject this donation log? This will mark it as rejected.');
+    if (!confirmed) {
+        return;
+    }
+
+    updateDonationLogStatus('rejected');
+}
+
+async function updateDonationLogStatus(status) {
+    if (!selectedDonationLog) {
+        return;
+    }
+
+    const approveBtn = document.getElementById('approveDonationLog');
+    const rejectBtn = document.getElementById('rejectDonationLog');
+    const originalApproveHTML = approveBtn ? approveBtn.innerHTML : '';
+    const originalRejectHTML = rejectBtn ? rejectBtn.innerHTML : '';
+    const targetBtn = status === 'approved' ? approveBtn : rejectBtn;
+    const loadingLabel = status === 'approved' ? 'Approving...' : 'Rejecting...';
+
+    if (approveBtn) approveBtn.disabled = true;
+    if (rejectBtn) rejectBtn.disabled = true;
+    if (targetBtn) {
+        targetBtn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${loadingLabel}`;
+    }
+
+    try {
+        const { doc, updateDoc } = await import('https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js');
+        const verifiedAt = new Date().toISOString();
+        const verifiedBy = currentUser ? currentUser.email : 'admin';
+
+        await updateDoc(doc(db, 'donation-logs', selectedDonationLog.firestoreId), {
+            verificationStatus: status,
+            verifiedAt,
+            verifiedBy
+        });
+
+        selectedDonationLog = {
+            ...selectedDonationLog,
+            verificationStatus: status,
+            verifiedAt,
+            verifiedBy
+        };
+
+        const logIndex = donationLogs.findIndex(log => log.firestoreId === selectedDonationLog.firestoreId);
+        if (logIndex > -1) {
+            donationLogs[logIndex] = {
+                ...donationLogs[logIndex],
+                verificationStatus: status,
+                verifiedAt,
+                verifiedBy
+            };
+        }
+
+        renderDonationLogDetails(selectedDonationLog);
+        updateDonationActionButtons(status);
+        renderDonationLogs();
+        showSuccess(`Donation log ${status}.`);
+    } catch (error) {
+        console.error('Error updating donation log:', error);
+        showError('Failed to update donation log. Please try again.');
+        if (approveBtn) approveBtn.innerHTML = originalApproveHTML;
+        if (rejectBtn) rejectBtn.innerHTML = originalRejectHTML;
+        updateDonationActionButtons(normalizeDonationStatus(selectedDonationLog.verificationStatus));
     }
 }
 
@@ -587,7 +1396,7 @@ function renderTable() {
                     ${isReached ? `<br><span class="reached-badge"><i class="fas fa-check-circle"></i> Reached${location.reachedByTeam ? ' by ' + escapeHtml(location.reachedByTeam) : ''}</span>` : ''}
                 </td>
                 <td>
-                    <span class="urgency-badge" style="background-color: ${urgencyColor};">
+                    <span class="urgency-badge" style="color: ${urgencyColor};">
                         ${urgencyText}
                     </span>
                 </td>
@@ -714,7 +1523,7 @@ async function handleDeleteConfirm() {
         }
 
         showError(errorMessage);
-
+    } finally {
         // Reset button
         confirmBtn.innerHTML = originalHTML;
         confirmBtn.disabled = false;
@@ -834,7 +1643,7 @@ function viewDetails(firestoreId) {
                     </div>
                     <div class="detail-item">
                         <label>Urgency Level:</label>
-                        <span class="urgency-badge" style="background-color: ${urgencyColor};">
+                        <span class="urgency-badge" style="color: ${urgencyColor};">
                             ${location.urgencyLevel.toUpperCase()}
                         </span>
                     </div>
@@ -1690,6 +2499,7 @@ function closeGovtSyncModal() {
 window.showDeleteModal = showDeleteModal;
 window.viewDetails = viewDetails;
 window.toggleReached = toggleReached;
+window.viewDonationLog = viewDonationLog;
 
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', initAdmin);

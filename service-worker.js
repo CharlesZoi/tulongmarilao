@@ -1,4 +1,4 @@
-const CACHE_VERSION = '2026-01-23-01';
+const CACHE_VERSION = '2026-01-27-01';
 const CACHE_NAME = `marilao-relief-map-${CACHE_VERSION}`;
 const urlsToCache = [
   './',
@@ -9,7 +9,6 @@ const urlsToCache = [
   './firebase-config.js',
   './firebase-chat-config.js',
   './signup.html',
-  './user-login.html',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js',
   'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css'

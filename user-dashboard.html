@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Dashboard - Tulong Marilao</title>
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" sizes="32x32" href="icons/windows11/Square44x44Logo.targetsize-32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="icons/windows11/Square44x44Logo.targetsize-16.png">
+    <link rel="shortcut icon" href="icons/android/android-launchericon-48-48.png">
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="admin-styles.css">
+    <link rel="stylesheet" href="user-dashboard-styles.css">
+</head>
+
+<body class="admin-page">
+    <!-- User Dashboard -->
+    <div id="userDashboard" class="admin-dashboard">
+        <!-- Header -->
+        <nav class="admin-header">
+            <div class="admin-header-left">
+                <h1>
+                    <img class="admin-logo admin-logo--md" src="icons/windows11/Square44x44Logo.targetsize-32.png"
+                        alt="Crowdpin logo">
+                    User Dashboard
+                </h1>
+                <span class="admin-subtitle">Personal Relief Activity Tracking</span>
+            </div>
+            <div class="admin-header-right">
+                <div class="admin-user-info">
+                    <i class="fas fa-user"></i>
+                    <span id="userGuestId">Guest User</span>
+                </div>
+                <button id="backToMapBtn" class="btn btn-secondary btn-sm">
+                    <i class="fas fa-arrow-left"></i> Back to Map
+                </button>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <div class="admin-content">
+            <!-- Stats Cards -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon critical">
+                        <i class="fas fa-map-pin"></i>
+                    </div>
+                    <div class="stat-info">
+                        <h3 id="reportedCount">0</h3>
+                        <p>Reported Locations</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon urgent">
+                        <i class="fas fa-hand-holding-heart"></i>
+                    </div>
+                    <div class="stat-info">
+                        <h3 id="supportedCount">0</h3>
+                        <p>Supported Locations</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon moderate">
+                        <i class="fas fa-donate"></i>
+                    </div>
+                    <div class="stat-info">
+                        <h3 id="donationCount">0</h3>
+                        <p>Donation Logs</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon reached">
+                        <i class="fas fa-check-circle"></i>
+                    </div>
+                    <div class="stat-info">
+                        <h3 id="reachedCount">0</h3>
+                        <p>Reached Locations</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon total">
+                        <i class="fas fa-chart-line"></i>
+                    </div>
+                    <div class="stat-info">
+                        <h3 id="activityCount">0</h3>
+                        <p>Total Activities</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section-toggle" role="tablist" aria-label="User data views">
+                <button id="showReportedBtn" class="btn btn-info btn-sm is-active" type="button" aria-pressed="true">
+                    <i class="fas fa-map-pin"></i> Reported Locations
+                </button>
+                <button id="showSupportedBtn" class="btn btn-secondary btn-sm" type="button" aria-pressed="false">
+                    <i class="fas fa-hand-holding-heart"></i> Supported Locations
+                </button>
+                <button id="showDonationsBtn" class="btn btn-secondary btn-sm" type="button" aria-pressed="false">
+                    <i class="fas fa-donate"></i> Donation Logs
+                </button>
+                <div style="margin-left: auto; display: flex; gap: 0.5rem;">
+                    <button id="downloadFormatBtn" class="btn btn-secondary btn-sm" type="button"
+                        title="Download sheet format for bulk data entry">
+                        <i class="fas fa-file-download"></i> Download Format
+                    </button>
+                    <button id="exportDataBtn" class="btn btn-success btn-sm" type="button"
+                        title="Export your activity data">
+                        <i class="fas fa-upload"></i> Export Data
+                    </button>
+                </div>
+            </div>
+
+            <!-- Reported Locations Section -->
+            <div id="reportedSection">
+                <!-- Filters and Search -->
+                <div class="admin-controls">
+                    <div class="search-container">
+                        <i class="fas fa-search"></i>
+                        <input type="text" id="searchReported" placeholder="Search by location name or landmark...">
+                    </div>
+                    <div class="filter-container">
+                        <label><i class="fas fa-filter"></i> Filter by Urgency:</label>
+                        <select id="reportedUrgencyFilter">
+                            <option value="all">All Urgency Levels</option>
+                            <option value="critical">Critical</option>
+                            <option value="urgent">Urgent</option>
+                            <option value="moderate">Moderate</option>
+                        </select>
+                    </div>
+                    <div class="filter-container">
+                        <label><i class="fas fa-check-circle"></i> Filter by Status:</label>
+                        <select id="reportedStatusFilter">
+                            <option value="all">All Locations</option>
+                            <option value="reached">Reached Only</option>
+                            <option value="not-reached">Not Reached Only</option>
+                        </select>
+                    </div>
+                    <div class="filter-container">
+                        <label><i class="fas fa-sort"></i> Sort by:</label>
+                        <select id="reportedSortBy">
+                            <option value="date-desc">Newest First</option>
+                            <option value="date-asc">Oldest First</option>
+                            <option value="urgency">Urgency Level</option>
+                            <option value="name">Location Name</option>
+                        </select>
+                    </div>
+                    <button id="refreshReportedBtn" class="btn btn-info btn-sm">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                </div>
+
+                <!-- Reported Locations Table -->
+                <div class="pins-table-container">
+                    <table class="pins-table">
+                        <thead>
+                            <tr>
+                                <th>Location</th>
+                                <th>Urgency</th>
+                                <th>Date</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="reportedTableBody">
+                            <tr>
+                                <td colspan="5" class="loading-row">
+                                    <i class="fas fa-spinner fa-spin"></i> Loading reported locations...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Empty State -->
+                <div id="reportedEmptyState" class="empty-state" style="display: none;">
+                    <i class="fas fa-map-pin"></i>
+                    <h3>No reported locations found</h3>
+                    <p>You haven't reported any locations yet. Go to the map to start reporting locations that need
+                        help.</p>
+                    <a href="index.html" class="btn btn-primary">
+                        <i class="fas fa-map"></i> Go to Map
+                    </a>
+                </div>
+            </div>
+
+            <!-- Supported Locations Section -->
+            <div id="supportedSection" class="admin-section" style="display: none;">
+                <div class="admin-section-header">
+                    <div>
+                        <h2><i class="fas fa-hand-holding-heart"></i> Supported Locations</h2>
+                        <p>Locations you have supported with donations or assistance.</p>
+                    </div>
+                </div>
+                <div class="admin-controls">
+                    <div class="search-container">
+                        <i class="fas fa-search"></i>
+                        <input type="text" id="searchSupported" placeholder="Search by location name...">
+                    </div>
+                    <div class="filter-container">
+                        <label><i class="fas fa-check-circle"></i> Filter by Status:</label>
+                        <select id="supportedStatusFilter">
+                            <option value="all">All Locations</option>
+                            <option value="reached">Reached Only</option>
+                            <option value="not-reached">Not Reached Only</option>
+                        </select>
+                    </div>
+                    <button id="refreshSupportedBtn" class="btn btn-info btn-sm">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                </div>
+                <div class="pins-table-container">
+                    <table class="pins-table">
+                        <thead>
+                            <tr>
+                                <th>Location</th>
+                                <th>Urgency</th>
+                                <th>Date Supported</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="supportedTableBody">
+                            <tr>
+                                <td colspan="5" class="loading-row">
+                                    <i class="fas fa-spinner fa-spin"></i> Loading supported locations...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div id="supportedEmptyState" class="empty-state" style="display: none;">
+                    <i class="fas fa-hand-holding-heart"></i>
+                    <h3>No supported locations found</h3>
+                    <p>You can only support locations that you have reported. Report a location first, then use the
+                        "Support a Location" feature to help.</p>
+                </div>
+            </div>
+
+            <!-- Donation Logs Section -->
+            <div id="donationsSection" class="admin-section" style="display: none;">
+                <div class="admin-section-header">
+                    <div>
+                        <h2><i class="fas fa-donate"></i> Donation Logs</h2>
+                        <p>History of your logged donations and relief deliveries.</p>
+                    </div>
+                </div>
+                <div class="admin-controls">
+                    <div class="search-container">
+                        <i class="fas fa-search"></i>
+                        <input type="text" id="searchDonations" placeholder="Search by location or items...">
+                    </div>
+                    <div class="filter-container">
+                        <label><i class="fas fa-truck"></i> Delivery Status:</label>
+                        <select id="donationsDeliveryFilter">
+                            <option value="all">All Deliveries</option>
+                            <option value="on-the-way">On-the-way operations</option>
+                            <option value="reached">Donations reached</option>
+                        </select>
+                    </div>
+                    <button id="refreshDonationsBtn" class="btn btn-info btn-sm">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                </div>
+                <div class="pins-table-container donation-logs-table">
+                    <table class="pins-table">
+                        <thead>
+                            <tr>
+                                <th>Location</th>
+                                <th>Items</th>
+                                <th>Cash</th>
+                                <th>Submitted</th>
+                                <th>Delivery Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="donationsTableBody">
+                            <tr>
+                                <td colspan="6" class="loading-row">
+                                    <i class="fas fa-spinner fa-spin"></i> Loading donation logs...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div id="donationsEmptyState" class="empty-state" style="display: none;">
+                    <i class="fas fa-donate"></i>
+                    <h3>No donation logs found</h3>
+                    <p>You can only log donations for locations that you have reported. Report a location first, then
+                        use the "Log Donations" feature to record your relief deliveries.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- View Details Modal -->
+    <div id="detailsModal" class="modal" style="display: none;">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h3><i class="fas fa-info-circle"></i> Location Details</h3>
+                <button id="closeDetailsModal" class="close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="locationDetails" class="location-details-container"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Donation Details Modal -->
+    <div id="donationDetailsModal" class="modal" style="display: none;">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h3><i class="fas fa-donate"></i> Donation Details</h3>
+                <button id="closeDonationDetailsModal" class="close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="donationDetails"></div>
+            </div>
+            <div class="modal-footer">
+                <button id="closeDonationDetailsBtn" class="btn btn-secondary">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Location Modal -->
+    <div id="editLocationModal" class="modal" style="display: none;">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h3><i class="fas fa-edit"></i> Edit Reported Location</h3>
+                <button id="closeEditLocationModal" class="close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="editLocationForm">
+                    <input type="hidden" id="editLocationId">
+
+                    <div class="form-group">
+                        <label for="editLocationName">Location Name *</label>
+                        <input type="text" id="editLocationName" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="editLandmark">Landmark Details *</label>
+                        <input type="text" id="editLandmark" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="editUrgency">Urgency Level *</label>
+                        <div class="urgency-buttons">
+                            <button type="button" class="urgency-btn" data-urgency="critical">
+                                <i class="fas fa-exclamation-triangle"></i>
+                                Critical
+                            </button>
+                            <button type="button" class="urgency-btn" data-urgency="urgent">
+                                <i class="fas fa-clock"></i>
+                                Urgent
+                            </button>
+                            <button type="button" class="urgency-btn" data-urgency="moderate">
+                                <i class="fas fa-calendar"></i>
+                                Moderate
+                            </button>
+                        </div>
+                        <input type="hidden" id="editUrgencyLevel" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="editReliefNeeds">What help is needed? *</label>
+                        <div class="checkbox-group">
+                            <label><input type="checkbox" value="relief goods"> Relief Goods (Food, Clothing)</label>
+                            <label><input type="checkbox" value="clean water"> Clean Water</label>
+                            <label><input type="checkbox" value="drinking water"> Drinking Water</label>
+                            <label><input type="checkbox" value="volunteers"> Volunteers</label>
+                            <label><input type="checkbox" value="temporary shelter"> Temporary Shelter</label>
+                            <label><input type="checkbox" value="medical aid"> Medical Aid</label>
+                            <label><input type="checkbox" value="transportation"> Transportation</label>
+                            <label><input type="checkbox" value="other"> Other</label>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="editPeopleCount">Number of People Affected</label>
+                        <input type="number" id="editPeopleCount" min="1" step="1">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="editAdditionalInfo">Additional Information</label>
+                        <textarea id="editAdditionalInfo" rows="3"></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="editReporterName">Reported By *</label>
+                        <input type="text" id="editReporterName" readonly
+                            style="background-color: #f8f9fa; cursor: not-allowed;" required>
+                        <small style="color: #6c757d; font-size: 0.85rem;">This is automatically set based on who
+                            submitted the report</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="editContactPerson">Contact Person</label>
+                        <input type="text" id="editContactPerson"
+                            placeholder="Name of contact person (if different from reporter)">
+                        <small style="color: #6c757d; font-size: 0.85rem;">Person to contact for follow-up about this
+                            location</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="editReporterContact">Contact *</label>
+                        <input type="tel" id="editReporterContact" pattern="[0-9]*" required>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="button" id="cancelEditLocation" class="btn btn-secondary">Cancel</button>
+                        <button type="submit" class="btn btn-success">Save Changes</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div id="deleteLocationModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-exclamation-triangle"></i> Confirm Deletion</h3>
+                <button id="closeDeleteLocationModal" class="close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p><strong>Are you sure you want to delete this reported location?</strong></p>
+                <div id="deleteLocationInfo" class="delete-info"></div>
+                <p class="warning-text">
+                    <i class="fas fa-info-circle"></i> This action cannot be undone and will remove the location from
+                    all devices.
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button id="cancelDeleteLocation" class="btn btn-secondary">Cancel</button>
+                <button id="confirmDeleteLocation" class="btn btn-danger">
+                    <i class="fas fa-trash"></i> Delete Location
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- SheetJS Library for Excel Export -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+
+    <!-- Firebase SDK -->
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js';
+        import { getFirestore } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js';
+        import { getAuth } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-auth.js';
+        import { firebaseConfig } from './firebase-config.js';
+
+        // Initialize Firebase
+        try {
+            const app = initializeApp(firebaseConfig, 'user-dashboard');
+            const db = getFirestore(app);
+            const auth = getAuth(app);
+
+            // Make Firebase available globally
+            window.firebaseApp = app;
+            window.firestoreDb = db;
+            window.firebaseAuth = auth;
+
+            console.log('Firebase SDK loaded successfully');
+        } catch (error) {
+            console.error('Firebase initialization failed:', error);
+            alert('Failed to connect to database. Please check your internet connection.');
+        }
+    </script>
+
+    <script src="user-dashboard.js"></script>
+</body>
+
+</html>

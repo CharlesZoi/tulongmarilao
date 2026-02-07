@@ -137,9 +137,9 @@ function updateAuthStatus(status) {
                 userStatus.textContent = 'Public User';
             }
             authIndicator.className = 'auth-indicator anonymous';
-            authIndicator.href = 'user-login.html'; // Enable link to login
-            authIndicator.style.cursor = 'pointer';
-            authIndicator.title = 'Click to login or sign up';
+            authIndicator.href = '#';
+            authIndicator.style.cursor = 'default';
+            authIndicator.title = 'Public access';
 
             // Show "Admin" button for non-logged-in users
             if (adminLink) {

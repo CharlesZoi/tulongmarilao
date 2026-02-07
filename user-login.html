@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Donor Access | Tulong Marilao</title>
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" sizes="32x32" href="icons/windows11/Square44x44Logo.targetsize-32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="icons/windows11/Square44x44Logo.targetsize-16.png">
+    <link rel="shortcut icon" href="icons/android/android-launchericon-48-48.png">
+
+    <meta name="theme-color" content="#0f172a">
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+    <link rel="stylesheet" href="donor-styles.css">
+</head>
+
+<body class="donor-auth-page">
+    <main class="donor-auth">
+        <section class="donor-auth-hero">
+            <h1>Donor Access Portal</h1>
+            <p>
+                Coordinate relief deliveries, claim unreached locations, and submit verified donation logs for
+                community transparency.
+            </p>
+            <div class="donor-auth-highlights">
+                <div class="donor-auth-highlight">
+                    <i class="fas fa-location-dot"></i>
+                    <span>Claim unreached locations to mark "on the way".</span>
+                </div>
+                <div class="donor-auth-highlight">
+                    <i class="fas fa-hand-holding-heart"></i>
+                    <span>Log goods, cash totals, and distribution notes in one place.</span>
+                </div>
+                <div class="donor-auth-highlight">
+                    <i class="fas fa-camera"></i>
+                    <span>Upload photo proof for master admin verification.</span>
+                </div>
+            </div>
+        </section>
+
+        <section class="donor-auth-card">
+            <div class="auth-card-header">
+                <h2>Sign in as a donor</h2>
+                <p>Use your account or continue anonymously to jump into the donor dashboard.</p>
+            </div>
+
+            <div class="auth-tabs">
+                <button class="auth-tab is-active" type="button" data-tab="login">Login</button>
+                <button class="auth-tab" type="button" data-tab="register">Register</button>
+            </div>
+
+            <div class="auth-message" id="authMessage"></div>
+
+            <form id="loginForm" class="auth-form" data-form="login">
+                <div>
+                    <label for="loginEmail"><i class="fas fa-envelope"></i> Email</label>
+                    <input type="email" id="loginEmail" placeholder="you@example.com" autocomplete="email" required>
+                </div>
+                <div>
+                    <label for="loginPassword"><i class="fas fa-lock"></i> Password</label>
+                    <input type="password" id="loginPassword" placeholder="Enter your password"
+                        autocomplete="current-password" required>
+                </div>
+                <div class="auth-actions">
+                    <button class="donor-btn primary" type="submit">Login</button>
+                    <button class="donor-btn ghost" type="button" id="anonLoginBtn">Continue as Anonymous Donor</button>
+                </div>
+            </form>
+
+            <form id="registerForm" class="auth-form" data-form="register" style="display: none;">
+                <div>
+                    <label for="registerName"><i class="fas fa-user"></i> Full name</label>
+                    <input type="text" id="registerName" placeholder="Juan Dela Cruz" autocomplete="name" required>
+                </div>
+                <div>
+                    <label for="registerEmail"><i class="fas fa-envelope"></i> Email</label>
+                    <input type="email" id="registerEmail" placeholder="you@example.com" autocomplete="email" required>
+                </div>
+                <div>
+                    <label for="registerPassword"><i class="fas fa-lock"></i> Password</label>
+                    <input type="password" id="registerPassword" placeholder="Create a password"
+                        autocomplete="new-password" required>
+                </div>
+                <div>
+                    <label for="registerConfirmPassword"><i class="fas fa-lock"></i> Confirm password</label>
+                    <input type="password" id="registerConfirmPassword" placeholder="Repeat your password"
+                        autocomplete="new-password" required>
+                </div>
+                <div class="auth-actions">
+                    <button class="donor-btn primary" type="submit">Create Account</button>
+                    <button class="donor-btn ghost" type="button" data-tab-switch="login">Back to Login</button>
+                </div>
+            </form>
+
+            <div class="auth-footer">
+                <a href="index.html"><i class="fas fa-arrow-left"></i> Back to public map</a>
+                <span>Every donation will be verified by the master admin.</span>
+            </div>
+        </section>
+    </main>
+
+    <script type="module" src="user-login.js"></script>
+</body>
+
+</html>

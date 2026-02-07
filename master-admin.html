@@ -59,6 +59,27 @@
         </div>
     </div>
 
+    <!-- Donation Log Details Modal -->
+    <div id="donationLogModal" class="modal" style="display: none;">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h3><i class="fas fa-hand-holding-heart"></i> Donation Log</h3>
+                <button id="closeDonationLogModal" class="close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="donationLogDetails"></div>
+            </div>
+            <div class="modal-footer">
+                <button id="rejectDonationLog" class="btn btn-danger">
+                    <i class="fas fa-times"></i> Reject
+                </button>
+                <button id="approveDonationLog" class="btn btn-success">
+                    <i class="fas fa-check"></i> Approve
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Admin Dashboard -->
     <div id="adminDashboard" class="admin-dashboard" style="display: none;">
         <!-- Header -->
@@ -137,100 +158,155 @@
                 </div>
             </div>
 
-            <!-- Admin Map Access Info -->
-            <div class="info-box"
-                style="background: #fff3cd; border-left: 4px solid #ffd700; padding: 1rem; border-radius: 6px; margin-bottom: 1.5rem;">
-                <div style="display: flex; align-items: center; gap: 0.75rem;">
-                    <img class="admin-logo admin-logo--sm" src="icons/windows11/Square44x44Logo.targetsize-32.png"
-                        alt="Crowdpin logo">
+            <div class="section-toggle" role="tablist" aria-label="Admin data views">
+                <button id="showPinsBtn" class="btn btn-info btn-sm is-active" type="button" aria-pressed="true">
+                    <i class="fas fa-map-pin"></i> Pins Table
+                </button>
+                <button id="showDonationLogsBtn" class="btn btn-secondary btn-sm" type="button" aria-pressed="false">
+                    <i class="fas fa-hand-holding-heart"></i> Donation Logs
+                </button>
+                <div style="margin-left: auto;">
+                    <button id="helpBtn" class="btn btn-outline-info btn-sm" type="button"
+                        title="Dashboard Help & Guide">
+                        <i class="fas fa-question-circle"></i> Help
+                    </button>
+                </div>
+            </div>
+
+            <div id="pinsSection">
+                <!-- Filters and Search -->
+                <div class="admin-controls">
+                    <div class="search-container">
+                        <i class="fas fa-search"></i>
+                        <input type="text" id="searchPins"
+                            placeholder="Search by location name, source, or reporter...">
+                    </div>
+                    <div class="filter-container">
+                        <label><i class="fas fa-filter"></i> Filter by Urgency:</label>
+                        <select id="urgencyFilter">
+                            <option value="all">All Urgency Levels</option>
+                            <option value="critical">Critical</option>
+                            <option value="urgent">Urgent</option>
+                            <option value="moderate">Moderate</option>
+                        </select>
+                    </div>
+                    <div class="filter-container">
+                        <label><i class="fas fa-check-circle"></i> Filter by Status:</label>
+                        <select id="reachedFilter">
+                            <option value="all">All Locations</option>
+                            <option value="reached">Reached Only</option>
+                            <option value="not-reached">Not Reached Only</option>
+                        </select>
+                    </div>
+                    <div class="filter-container">
+                        <label><i class="fas fa-sort"></i> Sort by:</label>
+                        <select id="sortBy">
+                            <option value="date-desc">Newest First</option>
+                            <option value="date-asc">Oldest First</option>
+                            <option value="urgency">Urgency Level</option>
+                            <option value="name">Location Name</option>
+                        </select>
+                    </div>
+                    <button id="refreshBtn" class="btn btn-info btn-sm">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                    <button id="downloadExcelBtn" class="btn btn-success btn-sm">
+                        <i class="fas fa-file-excel"></i> Download Excel
+                    </button>
+                    <button id="importExcelBtn" class="btn btn-primary btn-sm"
+                        title="Import relief locations from Excel (.xlsx, .xls) or JSON (.json) files. Excel requires Location Name, Latitude, and Longitude columns. JSON should be an array of location objects.">
+                        <i class="fas fa-file-upload"></i> Import Data
+                    </button>
+                    <button id="undoImportBtn" class="btn btn-warning btn-sm" style="display: none;"
+                        title="Undo the last data import">
+                        <i class="fas fa-undo"></i> Undo Last Import
+                    </button>
+                    <input type="file" id="excelFileInput" accept=".xlsx,.xls,.json" style="display: none;">
+                </div>
+
+                <!-- Pins Table -->
+                <div class="pins-table-container">
+                    <table class="pins-table">
+                        <thead>
+                            <tr>
+                                <th>Location</th>
+                                <th>Urgency</th>
+                                <th>Source</th>
+                                <th>Relief Needs</th>
+                                <th>Reporter</th>
+                                <th>Date</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="pinsTableBody">
+                            <tr>
+                                <td colspan="7" class="loading-row">
+                                    <i class="fas fa-spinner fa-spin"></i> Loading pins...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Empty State -->
+                <div id="emptyState" class="empty-state" style="display: none;">
+                    <i class="fas fa-inbox"></i>
+                    <h3>No pins found</h3>
+                    <p>There are no reported locations matching your filters.</p>
+                </div>
+            </div>
+
+            <div id="donationLogsSection" class="admin-section" style="display: none;">
+                <div class="admin-section-header">
                     <div>
-                        <strong style="color: #856404;">Master Admin Access</strong>
-                        <p style="margin: 0.25rem 0 0 0; color: #333; font-size: 0.9rem;">
-                            You have full privileges to delete ANY pin and manage ALL locations. Click <strong>"Admin
-                                Map"</strong> to access the admin map with master admin delete capabilities.
-                        </p>
+                        <h2><i class="fas fa-hand-holding-heart"></i> Donation Logs</h2>
+                        <p>Review and verify submitted donation deliveries.</p>
                     </div>
                 </div>
-            </div>
-
-            <!-- Filters and Search -->
-            <div class="admin-controls">
-                <div class="search-container">
-                    <i class="fas fa-search"></i>
-                    <input type="text" id="searchPins" placeholder="Search by location name, source, or reporter...">
+                <div class="admin-controls donation-controls">
+                    <div class="search-container">
+                        <i class="fas fa-search"></i>
+                        <input type="text" id="donationSearch" placeholder="Search by donor or location...">
+                    </div>
+                    <div class="filter-container">
+                        <label><i class="fas fa-truck"></i> Delivery Status:</label>
+                        <select id="donationDeliveryFilter">
+                            <option value="all">All Deliveries</option>
+                            <option value="on-the-way">On-the-way operations</option>
+                            <option value="reached">Donations reached</option>
+                        </select>
+                    </div>
+                    <button id="refreshDonationLogs" class="btn btn-info btn-sm">
+                        <i class="fas fa-sync-alt"></i> Refresh Logs
+                    </button>
                 </div>
-                <div class="filter-container">
-                    <label><i class="fas fa-filter"></i> Filter by Urgency:</label>
-                    <select id="urgencyFilter">
-                        <option value="all">All Urgency Levels</option>
-                        <option value="critical">Critical</option>
-                        <option value="urgent">Urgent</option>
-                        <option value="moderate">Moderate</option>
-                    </select>
+                <div class="pins-table-container donation-logs-table">
+                    <table class="pins-table">
+                        <thead>
+                            <tr>
+                                <th>Donor</th>
+                                <th>Location</th>
+                                <th>Items</th>
+                                <th>Cash</th>
+                                <th>Submitted</th>
+                                <th>Delivery Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="donationLogsBody">
+                            <tr>
+                                <td colspan="7" class="loading-row">
+                                    <i class="fas fa-spinner fa-spin"></i> Loading donation logs...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
-                <div class="filter-container">
-                    <label><i class="fas fa-check-circle"></i> Filter by Status:</label>
-                    <select id="reachedFilter">
-                        <option value="all">All Locations</option>
-                        <option value="reached">Reached Only</option>
-                        <option value="not-reached">Not Reached Only</option>
-                    </select>
+                <div id="donationLogsEmpty" class="empty-state" style="display: none;">
+                    <i class="fas fa-hand-holding-heart"></i>
+                    <h3>No donation logs found</h3>
+                    <p>There are no donation logs matching your filters.</p>
                 </div>
-                <div class="filter-container">
-                    <label><i class="fas fa-sort"></i> Sort by:</label>
-                    <select id="sortBy">
-                        <option value="date-desc">Newest First</option>
-                        <option value="date-asc">Oldest First</option>
-                        <option value="urgency">Urgency Level</option>
-                        <option value="name">Location Name</option>
-                    </select>
-                </div>
-                <button id="refreshBtn" class="btn btn-info btn-sm">
-                    <i class="fas fa-sync-alt"></i> Refresh
-                </button>
-                <button id="downloadExcelBtn" class="btn btn-success btn-sm">
-                    <i class="fas fa-file-excel"></i> Download Excel
-                </button>
-                <button id="importExcelBtn" class="btn btn-primary btn-sm"
-                    title="Import relief locations from Excel (.xlsx, .xls) or JSON (.json) files. Excel requires Location Name, Latitude, and Longitude columns. JSON should be an array of location objects.">
-                    <i class="fas fa-file-upload"></i> Import Data
-                </button>
-                <button id="undoImportBtn" class="btn btn-warning btn-sm" style="display: none;"
-                    title="Undo the last data import">
-                    <i class="fas fa-undo"></i> Undo Last Import
-                </button>
-                <input type="file" id="excelFileInput" accept=".xlsx,.xls,.json" style="display: none;">
-            </div>
-
-            <!-- Pins Table -->
-            <div class="pins-table-container">
-                <table class="pins-table">
-                    <thead>
-                        <tr>
-                            <th>Location</th>
-                            <th>Urgency</th>
-                            <th>Source</th>
-                            <th>Relief Needs</th>
-                            <th>Reporter</th>
-                            <th>Date</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="pinsTableBody">
-                        <tr>
-                            <td colspan="7" class="loading-row">
-                                <i class="fas fa-spinner fa-spin"></i> Loading pins...
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-
-            <!-- Empty State -->
-            <div id="emptyState" class="empty-state" style="display: none;">
-                <i class="fas fa-inbox"></i>
-                <h3>No pins found</h3>
-                <p>There are no reported locations matching your filters.</p>
             </div>
         </div>
     </div>
@@ -274,6 +350,57 @@
                 <button id="viewOnMapBtn" class="btn btn-info">
                     <i class="fas fa-map-marker-alt"></i> View on Map
                 </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Help Modal -->
+    <div id="helpModal" class="modal" style="display: none;">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h3><i class="fas fa-question-circle"></i> Dashboard Help & Guide</h3>
+            </div>
+            <div class="modal-body">
+                <div class="help-content">
+                    <h4><i class="fas fa-map-pin"></i> Pins Table</h4>
+                    <p>View and manage all reported relief locations:</p>
+                    <ul>
+                        <li><strong>Search:</strong> Find locations by name, source, or reporter</li>
+                        <li><strong>Filter by Urgency:</strong> Show Critical, Urgent, or Moderate reports</li>
+                        <li><strong>Filter by Status:</strong> View reached or not-reached locations</li>
+                        <li><strong>Sort:</strong> Order by date, urgency, or name</li>
+                        <li><strong>Actions:</strong> View details, delete pins, mark as reached</li>
+                    </ul>
+
+                    <h4><i class="fas fa-hand-holding-heart"></i> Donation Logs</h4>
+                    <p>Review and verify submitted donation deliveries:</p>
+                    <ul>
+                        <li><strong>Search:</strong> Find donations by donor name or location</li>
+                        <li><strong>Delivery Status:</strong> Filter by on-the-way or reached donations</li>
+                        <li><strong>Actions:</strong> View details, approve or reject donations</li>
+                    </ul>
+
+                    <h4><i class="fas fa-user-shield"></i> Master Admin Features</h4>
+                    <p>Special capabilities available to master administrators:</p>
+                    <ul>
+                        <li><strong>Delete ANY pin:</strong> Full deletion privileges for all locations</li>
+                        <li><strong>Admin Map:</strong> Access admin map with enhanced capabilities</li>
+                        <li><strong>Import/Export:</strong> Download Excel reports and import location data</li>
+                        <li><strong>Real-time updates:</strong> Live data synchronization</li>
+                    </ul>
+
+                    <h4><i class="fas fa-info-circle"></i> Tips & Best Practices</h4>
+                    <ul>
+                        <li>Use the Refresh button to sync latest data</li>
+                        <li>Download Excel reports for offline analysis</li>
+                        <li>Verify donation deliveries promptly</li>
+                        <li>Mark locations as reached when relief is delivered</li>
+                        <li>Use the Admin Map for geographical view</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="closeHelpBtn" class="btn btn-primary">Got it!</button>
             </div>
         </div>
     </div>

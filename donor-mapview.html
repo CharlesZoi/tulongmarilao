@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Donor Mapview | Tulong Marilao</title>
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" sizes="32x32" href="icons/windows11/Square44x44Logo.targetsize-32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="icons/windows11/Square44x44Logo.targetsize-16.png">
+    <link rel="shortcut icon" href="icons/android/android-launchericon-48-48.png">
+
+    <meta name="theme-color" content="#0f172a">
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="donor-styles.css">
+</head>
+
+<body class="donor-dashboard-page">
+    <nav class="control-panel">
+        <button type="button" id="sidebarToggle" class="sidebar-toggle" aria-label="Open menu">
+            <i class="fas fa-bars"></i>
+            <span class="sidebar-toggle-label">Menu</span>
+        </button>
+        <button type="button" id="resetMapView" class="map-reset-btn" aria-label="Reset map view">
+            <i class="fas fa-arrows-rotate"></i>
+            <span class="map-reset-label">Reset View</span>
+        </button>
+    </nav>
+
+    <main>
+        <div class="map-container">
+            <div id="map"></div>
+
+            <div class="pinned-locations-dropdown">
+                <button id="viewPinnedBtn" class="btn btn-info">
+                    <i id="viewPinnedIcon" class="fas fa-map-pin"></i>
+                    <span id="viewPinnedLabel">View Unreached Locations</span> (<span id="pinnedCount">0</span>)
+                </button>
+
+                <div id="pinnedLocationsList" class="pinned-list" style="display: none;">
+                    <div class="pinned-list-header">
+                        <h4>
+                            <i id="pinnedListIcon" class="fas fa-map-pin"></i>
+                            <span id="pinnedListTitle">Unreached Locations</span>
+                        </h4>
+                        <button id="closePinnedList" class="close-btn">&times;</button>
+                    </div>
+
+                    <div class="pinned-list-filters">
+                        <div class="pinned-search-container">
+                            <input type="text" id="pinnedSearchInput" placeholder="Search locations..."
+                                autocomplete="off">
+                            <i class="fas fa-search pinned-search-icon"></i>
+                        </div>
+                        <div class="pinned-urgency-filters">
+                            <button class="urgency-filter active" data-urgency="all">
+                                <i class="fas fa-list"></i> All
+                            </button>
+                            <button class="urgency-filter" data-urgency="critical">
+                                <i class="fas fa-map-marker-alt"></i> Critical
+                            </button>
+                            <button class="urgency-filter" data-urgency="urgent">
+                                <i class="fas fa-map-marker-alt"></i> Urgent
+                            </button>
+                            <button class="urgency-filter" data-urgency="moderate">
+                                <i class="fas fa-map-marker-alt"></i> Moderate
+                            </button>
+                        </div>
+                    </div>
+                    <div class="pinned-list-content" id="pinnedListContent">
+                        <p class="no-pins">No locations loaded yet. Choose a location to support.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="sidebar-overlay" id="sidebarOverlay"></div>
+        <aside class="sidebar-panel" id="sidebarPanel" aria-hidden="true" inert>
+            <div class="sidebar-header">
+                <h3>Donor Mapview</h3>
+                <button type="button" id="sidebarClose" class="sidebar-close" aria-label="Close menu">&times;</button>
+            </div>
+            <div class="sidebar-content">
+                <div class="sidebar-section">
+                    <h4>Account</h4>
+                    <div class="donor-auth-actions" id="donorAuthActions">
+                        <button class="donor-btn ghost" type="button" id="donorLoginBtn">
+                            <i class="fas fa-right-to-bracket"></i> Log in
+                        </button>
+                        <button class="donor-btn primary" type="button" id="donorAnonymousBtn">
+                            <i class="fas fa-user-secret"></i> Donate as anonymous
+                        </button>
+                    </div>
+                    <div class="donor-session-actions" id="donorSessionActions" hidden>
+                        <span class="donor-pill" id="donorNameBadge">Signing in...</span>
+                        <button class="donor-btn ghost" type="button" id="donorLogoutBtn">
+                            <i class="fas fa-arrow-right-from-bracket"></i> Sign out
+                        </button>
+                    </div>
+                </div>
+
+                <div class="sidebar-section">
+                    <h4>Support Overview</h4>
+                    <div class="donor-map-status">
+                        <span id="mapStatusLabel">Map ready for unreached locations.</span>
+                        <span id="mapCountLabel">0 locations loaded</span>
+                    </div>
+                    <div class="panel-tabs">
+                        <button class="panel-tab is-active" type="button" data-panel="unreached">Unreached</button>
+                        <button class="panel-tab" type="button" data-panel="claims">My Claims</button>
+                        <button class="panel-tab" type="button" data-panel="logs">Donation Logs</button>
+                    </div>
+
+                    <div class="panel-content">
+                        <div class="panel-section is-active" data-panel-content="unreached">
+                            <div class="panel-search">
+                                <input type="text" id="unreachedSearch" placeholder="Search location or barangay">
+                                <select id="unreachedFilter">
+                                    <option value="all">All urgency levels</option>
+                                    <option value="critical">Critical</option>
+                                    <option value="urgent">Urgent</option>
+                                    <option value="moderate">Moderate</option>
+                                </select>
+                            </div>
+                            <div id="unreachedList">
+                                <p>Unreached locations will appear here once loaded.</p>
+                            </div>
+                        </div>
+
+                        <div class="panel-section" data-panel-content="claims">
+                            <div class="panel-search">
+                                <input type="text" id="claimsSearch" placeholder="Search your claimed locations">
+                                <select id="claimsFilter">
+                                    <option value="all">All claim statuses</option>
+                                    <option value="on-the-way">On the way</option>
+                                    <option value="pending">Pending verification</option>
+                                </select>
+                            </div>
+                            <div id="claimsList">
+                                <p>No claimed locations yet. Claim a location from the map tab.</p>
+                            </div>
+                        </div>
+
+                        <div class="panel-section" data-panel-content="logs">
+                            <div class="panel-search">
+                                <input type="text" id="logSearch" placeholder="Search donation logs">
+                                <select id="logFilter">
+                                    <option value="all">All statuses</option>
+                                    <option value="pending">Pending</option>
+                                    <option value="verified">Verified</option>
+                                    <option value="rejected">Rejected</option>
+                                </select>
+                            </div>
+                            <div class="location-actions">
+                                <button class="donor-btn primary" type="button" id="openDonationModal">
+                                    <i class="fas fa-plus"></i> Log a donation
+                                </button>
+                                <button class="donor-btn ghost" type="button" id="viewGuidelines">
+                                    <i class="fas fa-book"></i> Upload guidelines
+                                </button>
+                            </div>
+                            <div id="logsList">
+                                <p>No donation logs yet. Submit a log after completing a delivery.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="sidebar-section">
+                    <h4>Map Filters</h4>
+                    <div class="sidebar-toggle-row" id="reachedViewToggleRow">
+                        <div class="sidebar-toggle-label">
+                            <i class="fas fa-check-circle"></i>
+                            <span>View Reached Locations</span>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="reachedViewToggle">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+            <div class="sidebar-footer">
+                &copy; 2026 CivTech.ph
+            </div>
+        </aside>
+
+        <div class="info-panel-backdrop is-visible" id="infoPanelBackdrop"></div>
+        <div class="info-panel info-panel--hero" id="infoPanel">
+            <div class="info-content">
+                <div class="info-desktop-only info-hero">
+                    <span class="info-eyebrow">— Powered by CivTech.ph</span>
+                    <h2 class="info-title">Donor Support Map</h2>
+                    <p class="info-description">
+                        Coordinate claims, support locations, and log verified donation deliveries across Marilao.
+                    </p>
+                    <div class="info-highlights">
+                        <div class="info-chip"><i class="fas fa-hand-holding-heart"></i> Claim locations with one click
+                        </div>
+                        <div class="info-chip"><i class="fas fa-route"></i> Get navigation to drop-off points</div>
+                        <div class="info-chip"><i class="fas fa-clipboard-check"></i> Track donations in one place</div>
+                    </div>
+                    <div class="info-actions">
+                        <button type="button" class="info-cta info-start-btn">Start Supporting</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="directions-panel" id="directionsPanel">
+            <div class="directions-header">
+                <h3><i class="fas fa-route"></i> Turn-by-Turn Directions</h3>
+                <button id="closeDirections" class="close-btn">&times;</button>
+            </div>
+            <div class="directions-content" id="directionsContent">
+                <p class="no-route">No route planned. Click "Plan Route" to get started.</p>
+            </div>
+            <div class="route-summary" id="routeSummary" style="display: none;">
+                <div class="summary-item">
+                    <i class="fas fa-road"></i>
+                    <span id="routeDistance">--</span>
+                </div>
+                <div class="summary-item">
+                    <i class="fas fa-clock"></i>
+                    <span id="routeTime">--</span>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <div id="confirmLocationModal" class="modal confirm-location-modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-map-marker-alt"></i> Confirm Pin Location</h3>
+                <button id="closeConfirmLocationModal" class="close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p>Please confirm the pin is placed at the exact location.</p>
+                <div class="confirm-location-name" id="confirmLocationName">
+                    <i class="fas fa-location-dot"></i>
+                    <span class="confirm-location-name-text">Location: --</span>
+                </div>
+                <div class="confirm-location-summary" id="confirmLocationDetails" data-coords="">
+                    <span class="confirm-location-text">Lat: --, Lng: --</span>
+                    <button type="button" class="copy-coords-btn" id="copyConfirmCoords" title="Copy coordinates">
+                        <i class="fas fa-copy"></i>
+                    </button>
+                </div>
+
+                <div class="confirm-location-nav">
+                    <button type="button" class="waze-btn" id="confirmLocationWaze">
+                        <i class="fas fa-route"></i> View in Waze
+                    </button>
+                    <button type="button" class="google-maps-btn" id="confirmLocationGoogleMaps">
+                        <i class="fas fa-map-marked-alt"></i> Google Maps
+                    </button>
+                </div>
+
+                <div class="confirm-location-actions">
+                    <button id="confirmLocationNo" class="btn btn-secondary">
+                        <i class="fas fa-undo"></i> Choose Again
+                    </button>
+                    <button id="confirmLocationYes" class="btn btn-success">
+                        <i class="fas fa-check"></i> Yes, Continue
+                    </button>
+                </div>
+                <div class="confirm-location-preview" id="confirmLocationPreviewWrapper">
+                    <div id="confirmLocationMiniMap" class="confirm-location-preview-map"></div>
+                    <div class="confirm-location-preview-pin">
+                        <i class="fas fa-map-marker-alt"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="reportModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-plus-circle"></i> Report Location Needing Help</h3>
+                <button id="closeReportModal" class="close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="reportForm">
+                    <div class="form-group">
+                        <label for="locationName">Location Name *</label>
+                        <input type="text" id="locationName" placeholder="e.g., Barangay Lias, Marilao" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="locationSource">Source *</label>
+                        <select id="locationSource" required>
+                            <option value="">Select source...</option>
+                            <option value="facebook">Facebook Post</option>
+                            <option value="twitter">Twitter/X</option>
+                            <option value="instagram">Instagram</option>
+                            <option value="tiktok">TikTok</option>
+                            <option value="messenger">Messenger/WhatsApp</option>
+                            <option value="news">News Report</option>
+                            <option value="personal">Personal Contact</option>
+                            <option value="other">Other</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="reliefNeeds">What help is needed? *</label>
+                        <div class="checkbox-group">
+                            <label><input type="checkbox" value="relief goods"> Relief Goods (Food, Clothing)</label>
+                            <label><input type="checkbox" value="clean water"> Clean Water</label>
+                            <label><input type="checkbox" value="drinking water"> Drinking Water</label>
+                            <label><input type="checkbox" value="volunteers"> Volunteers</label>
+                            <label><input type="checkbox" value="temporary shelter"> Temporary Shelter</label>
+                            <label><input type="checkbox" value="medical aid"> Medical Aid</label>
+                            <label><input type="checkbox" value="transportation"> Transportation</label>
+                            <label><input type="checkbox" value="other"> Other</label>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="urgencyLevel">Urgency Level *</label>
+                        <select id="urgencyLevel" required>
+                            <option value="">Select urgency...</option>
+                            <option value="critical">Critical - Immediate help needed</option>
+                            <option value="urgent">Urgent - Help needed within 24 hours</option>
+                            <option value="moderate">Moderate - Help needed within few days</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="peopleCount">Number of People Affected</label>
+                        <input type="number" id="peopleCount" min="1" step="1" inputmode="numeric"
+                            placeholder="e.g., 120">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="additionalInfo">Additional Information</label>
+                        <textarea id="additionalInfo"
+                            placeholder="Any additional details about the situation, specific needs, etc."></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="imageUpload">Attach Photos (Optional)</label>
+                        <div class="image-upload-container">
+                            <input type="file" id="imageUpload" accept="image/*" multiple style="display: none;">
+                            <button type="button" id="imageUploadBtn" class="btn btn-outline">
+                                <i class="fas fa-camera"></i> Add Photos
+                            </button>
+                            <div id="imagePreview" class="image-preview-container"></div>
+                            <div class="upload-help-text">
+                                <small><i class="fas fa-info-circle"></i> You can upload multiple photos (max 5MB
+                                    each)</small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <p class="form-section-title">Contact Person</p>
+                        <p class="form-help-text"><em>Optional for updates and follow ups purposes. We don't display
+                                your informations
+                                publicly; only donors can view your personal details.</em></p>
+                        <label for="reporterName">Contact Person Name</label>
+                        <input type="text" id="reporterName" placeholder="Name or nickname of contact person">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="reporterContact">Contact</label>
+                        <input type="tel" id="reporterContact" pattern="[0-9]*" inputmode="numeric"
+                            oninput="this.value = this.value.replace(/[^0-9]/g, '');" placeholder="Phone number">
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="button" id="cancelReport" class="btn btn-secondary">Cancel</button>
+                        <button type="submit" class="btn btn-success">Submit Report</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div id="imageModal" class="image-modal">
+        <div class="image-modal-header">
+            <div id="imageModalDetails" class="image-modal-details"></div>
+            <button class="image-modal-close" onclick="closeImageModal()">&times;</button>
+        </div>
+        <div class="image-modal-content">
+            <div class="image-modal-image-container">
+                <img id="modalImage" src="" alt="Full size image">
+            </div>
+        </div>
+    </div>
+
+    <div class="donor-modal" id="donationModal" aria-hidden="true">
+        <div class="donor-modal-card">
+            <div class="modal-header">
+                <h3>New Donation Log</h3>
+                <button class="modal-close" type="button" id="closeDonationModal">&times;</button>
+            </div>
+            <form id="donationForm" class="auth-form">
+                <div>
+                    <label for="donationLocation">Select location</label>
+                    <select id="donationLocation" required>
+                        <option value="">Choose from your claimed locations</option>
+                    </select>
+                </div>
+                <div>
+                    <label>Relief items / goods</label>
+                    <div class="donation-items" id="donationItems">
+                        <div class="donation-item-row">
+                            <input type="text" placeholder="Item name" required>
+                            <input type="number" placeholder="Quantity" min="0" required>
+                            <input type="text" placeholder="Unit (packs, boxes)" required>
+                        </div>
+                    </div>
+                    <button class="donor-btn ghost" type="button" id="addDonationItem">
+                        <i class="fas fa-plus"></i> Add another item
+                    </button>
+                </div>
+                <div>
+                    <label for="cashAmount">Cash amount (optional)</label>
+                    <input type="text" id="cashAmount" placeholder="0.00" inputmode="decimal"
+                        pattern="^\d*(\.\d{0,2})?$">
+                </div>
+                <div>
+                    <label for="donationNotes">Distribution notes</label>
+                    <textarea id="donationNotes" rows="3"
+                        placeholder="Share how the relief was distributed."></textarea>
+                </div>
+                <div class="donation-photos">
+                    <label for="donationPhotos">Upload at least 2 photos</label>
+                    <input type="file" id="donationPhotos" accept="image/*" multiple required>
+                    <div class="photo-preview" id="photoPreview"></div>
+                </div>
+                <button class="donor-btn primary" type="submit">Submit donation log</button>
+            </form>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script type="module" src="donor-dashboard.js"></script>
+    <script src="script_clean.js"></script>
+</body>
+
+</html>

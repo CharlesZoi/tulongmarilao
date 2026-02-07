@@ -9,6 +9,19 @@ service cloud.firestore {
              ];
     }
 
+    function isResponseStatusUpdate() {
+      return request.auth != null &&
+        request.resource.data.diff(resource.data).changedKeys().hasOnly([
+        'onTheWay',
+        'on_the_way',
+        'responseStatus',
+        'donorResponding',
+        'respondingTeam',
+        'responseTeam',
+        'respondingAt'
+      ]);
+    }
+
     match /relief-locations/{locationId} {
       allow read: if true;
 
@@ -32,6 +45,7 @@ service cloud.firestore {
         (request.auth != null &&
           (resource.data.createdBy == request.auth.uid ||
            resource.data.userId == request.auth.uid)) ||
+        isResponseStatusUpdate() ||
         (request.auth == null &&
           (resource.data.createdBy is string ||
            resource.data.userId is string));
@@ -63,6 +77,47 @@ service cloud.firestore {
          resource.data.userType == 'Reporter');
 
       allow update: if false;
+    }
+
+    match /donation-logs/{logId} {
+      allow read: if true;
+
+      allow create: if (
+        // Authenticated user - must match their uid
+        (request.auth != null &&
+          (request.resource.data.createdBy == request.auth.uid ||
+           request.resource.data.userId == request.auth.uid ||
+           request.resource.data.donorId == request.auth.uid)) ||
+        // Anonymous user - allow any createdBy/userId value for public access
+        (request.auth == null &&
+          (request.resource.data.createdBy is string ||
+           request.resource.data.userId is string ||
+           request.resource.data.donorId is string))
+      ) &&
+        request.resource.data.locationId is string &&
+        request.resource.data.submittedAt is timestamp;
+
+      allow update: if isMasterAdmin() ||
+        (request.auth != null &&
+          (resource.data.createdBy == request.auth.uid ||
+           resource.data.userId == request.auth.uid ||
+           resource.data.donorId == request.auth.uid)) ||
+        (request.auth == null &&
+          (resource.data.createdBy is string ||
+           resource.data.userId is string ||
+           resource.data.donorId is string));
+
+      allow delete: if (
+        isMasterAdmin() ||
+        (request.auth != null &&
+          (resource.data.createdBy == request.auth.uid ||
+           resource.data.userId == request.auth.uid ||
+           resource.data.donorId == request.auth.uid)) ||
+        (request.auth == null &&
+          (resource.data.createdBy is string ||
+           resource.data.userId is string ||
+           resource.data.donorId is string))
+      );
     }
   }
 }

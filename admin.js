@@ -578,7 +578,7 @@ async function handleDeleteConfirm() {
     } catch (error) {
         console.error('Error deleting location:', error);
         showError('Failed to delete location. Please try again.');
-
+    } finally {
         confirmBtn.innerHTML = originalHTML;
         confirmBtn.disabled = false;
     }

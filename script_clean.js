@@ -193,6 +193,688 @@ function showCustomConfirm(message, subtitle = '') {
     });
 }
 
+const DONOR_DISPLAY_NAME_KEY = 'donorDisplayName';
+const DONOR_TEAM_NAME_KEY = 'donorTeamName';
+
+const GUEST_SESSION_KEY = 'guestSessionId';
+const GUEST_ACTIVITY_KEY = 'guestActivityLogs';
+
+function generateGuestId() {
+    const randomSegment = Math.floor(Math.random() * 10000000).toString().padStart(7, '0');
+    return `Guest${randomSegment}`;
+}
+
+function getStoredGuestId() {
+    return localStorage.getItem(GUEST_SESSION_KEY);
+}
+
+function updateDashboardTitle(guestId = null) {
+    const dashboardTitle = document.getElementById('dashboardTitle');
+    if (!dashboardTitle) {
+        return;
+    }
+
+    if (guestId) {
+        dashboardTitle.textContent = `${guestId}'s Dashboard`;
+    } else {
+        dashboardTitle.textContent = 'Dashboard';
+    }
+}
+
+function ensureGuestSession(options = {}) {
+    console.log('ensureGuestSession called with options:', options);
+    const { showAlert = false } = options;
+    const existingGuestId = getStoredGuestId();
+    if (existingGuestId) {
+        updateDashboardTitle(existingGuestId);
+        if (showAlert) {
+            systemAlert(`Welcome back, ${existingGuestId}. Your activity log is saved on this device.`);
+        }
+        return existingGuestId;
+    }
+
+    const guestId = generateGuestId();
+    localStorage.setItem(GUEST_SESSION_KEY, guestId);
+    if (!localStorage.getItem(GUEST_ACTIVITY_KEY)) {
+        localStorage.setItem(GUEST_ACTIVITY_KEY, JSON.stringify([]));
+    }
+    updateDashboardTitle(guestId);
+    if (showAlert) {
+        systemAlert(`Welcome! You're now exploring as ${guestId}. Your activity log stays on this device.`);
+    }
+    return guestId;
+}
+
+function loadGuestActivities() {
+    const stored = localStorage.getItem(GUEST_ACTIVITY_KEY);
+    if (!stored) {
+        return [];
+    }
+
+    try {
+        const parsed = JSON.parse(stored);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (error) {
+        console.warn('Failed to parse guest activity logs:', error);
+        return [];
+    }
+}
+
+function saveGuestActivities(activities) {
+    localStorage.setItem(GUEST_ACTIVITY_KEY, JSON.stringify(activities));
+}
+
+function addGuestActivity(entry) {
+    const guestId = getStoredGuestId();
+    if (!guestId) {
+        return;
+    }
+
+    const activities = loadGuestActivities();
+    const activity = {
+        id: `activity_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        guestId,
+        timestamp: new Date().toISOString(),
+        ...entry
+    };
+
+    const updated = [...activities, activity].slice(-200);
+    saveGuestActivities(updated);
+
+    const activityModal = document.getElementById('activityLogModal');
+    if (activityModal && activityModal.style.display === 'flex') {
+        updateActivityLogDisplay();
+    }
+}
+
+function getGuestActivities() {
+    const guestId = getStoredGuestId();
+    if (!guestId) {
+        return [];
+    }
+
+    return loadGuestActivities().filter(activity => activity.guestId === guestId);
+}
+
+function getLocationNameById(locationId) {
+    if (!locationId || !Array.isArray(userReportedLocations)) {
+        return '';
+    }
+
+    const location = userReportedLocations.find(item => (item.firestoreId || item.id) === locationId);
+    return location ? (location.name || location.locationName || '') : '';
+}
+
+function getDonorDisplayName() {
+    if (window.firebaseAuth && window.firebaseAuth.currentUser) {
+        return window.firebaseAuth.currentUser.displayName || window.firebaseAuth.currentUser.email || 'Donor';
+    }
+
+    const storedName = localStorage.getItem(DONOR_DISPLAY_NAME_KEY);
+    if (storedName) {
+        return storedName;
+    }
+
+    const guestId = getStoredGuestId();
+    if (guestId) {
+        return guestId;
+    }
+
+    return 'Donor';
+}
+
+function getDonorNameCandidates() {
+    const candidates = new Set();
+    const savedTeamName = localStorage.getItem(DONOR_TEAM_NAME_KEY);
+    if (savedTeamName) {
+        candidates.add(savedTeamName.trim());
+    }
+
+    const displayName = getDonorDisplayName();
+    if (displayName) {
+        candidates.add(displayName.trim());
+    }
+
+    return Array.from(candidates)
+        .filter(Boolean)
+        .map(name => name.toLowerCase());
+}
+
+function isCurrentDonorResponding(respondingName) {
+    if (!respondingName) {
+        return false;
+    }
+
+    const candidates = getDonorNameCandidates();
+    return candidates.includes(respondingName.toLowerCase());
+}
+
+function getCurrentSupporterId() {
+    if (window.firebaseAuth && window.firebaseAuth.currentUser) {
+        return window.firebaseAuth.currentUser.uid;
+    }
+
+    if (window.getCurrentUserId) {
+        return window.getCurrentUserId();
+    }
+
+    return getStoredGuestId();
+}
+
+function isLocationSupportedByCurrentUser(location, statusData = null) {
+    if (!location) {
+        return false;
+    }
+
+    const supporterId = getCurrentSupporterId();
+    const supporterIdValue = supporterId ? supporterId.toString() : '';
+    const supportedIds = [
+        location.supportedBy,
+        location.supportedById,
+        location.supporterId,
+        location.supporterUid,
+        location.donorId
+    ]
+        .filter(Boolean)
+        .map(id => id.toString());
+
+    if (supporterIdValue && supportedIds.includes(supporterIdValue)) {
+        return true;
+    }
+
+    const status = statusData || getResponseStatusData(location);
+    return isCurrentDonorResponding(status.respondingName) ||
+        isCurrentDonorResponding(location.reachedByTeam) ||
+        isCurrentDonorResponding(location.supportedByName);
+}
+
+function promptForDonorSupporterName(defaults = {}) {
+    return new Promise((resolve) => {
+        const existingModal = document.getElementById('donorSupporterModal');
+        if (existingModal) {
+            existingModal.remove();
+        }
+
+        const { individualName = '', teamName = '' } = defaults || {};
+        const nameParts = individualName ? individualName.trim().split(/\s+/) : [];
+        const defaultFirstName = nameParts.shift() || '';
+        const defaultLastName = nameParts.join(' ');
+        const preferTeam = Boolean(teamName && !individualName);
+
+        const modal = document.createElement('div');
+        modal.id = 'donorSupporterModal';
+        modal.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(15, 23, 42, 0.55);
+            z-index: 100003;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1.5rem;
+        `;
+
+        modal.innerHTML = `
+            <div style="
+                background: #ffffff;
+                padding: 1.5rem;
+                border-radius: 14px;
+                box-shadow: 0 18px 40px rgba(15, 23, 42, 0.35);
+                max-width: 420px;
+                width: 100%;
+                text-align: center;
+            ">
+                <div style="font-size: 1.1rem; font-weight: 700; color: #0f172a; margin-bottom: 0.5rem;">
+                    Support this location
+                </div>
+                <p style="margin: 0 0 1rem; color: #475569; font-size: 0.95rem;">
+                    Enter your details to mark this location as "on the way".
+                </p>
+                <p style="margin: 0 0 1rem; color: #b45309; font-size: 0.85rem;">
+                    Please provide accurate information so we can coordinate support.
+                </p>
+
+                <div style="margin-bottom: 1rem; text-align: left;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #374151;">Support Type</label>
+                    <div style="display: flex; gap: 1rem; margin-bottom: 0.5rem;">
+                        <label style="flex: 1; display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                            <input type="radio" name="supporterType" value="individual" ${preferTeam ? '' : 'checked'} style="margin: 0;">
+                            <span style="font-size: 0.9rem;">Individual</span>
+                        </label>
+                        <label style="flex: 1; display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                            <input type="radio" name="supporterType" value="team" ${preferTeam ? 'checked' : ''} style="margin: 0;">
+                            <span style="font-size: 0.9rem;">Team/Organization</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div id="supporterIndividualFields" style="margin-bottom: 1rem; text-align: left;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #374151;">First name</label>
+                    <input id="supporterFirstNameInput" type="text" placeholder="First name" required aria-required="true" style="
+                        width: 100%;
+                        padding: 0.75rem 0.85rem;
+                        border: 1px solid #cbd5f5;
+                        border-radius: 10px;
+                        font-size: 0.95rem;
+                        outline: none;
+                        margin-bottom: 0.35rem;
+                    ">
+                    <div id="supporterFirstNameError" style="display: none; color: #dc2626; font-size: 0.8rem; margin-bottom: 0.75rem;">Input is required.</div>
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #374151;">Last name</label>
+                    <input id="supporterLastNameInput" type="text" placeholder="Last name" required aria-required="true" style="
+                        width: 100%;
+                        padding: 0.75rem 0.85rem;
+                        border: 1px solid #cbd5f5;
+                        border-radius: 10px;
+                        font-size: 0.95rem;
+                        outline: none;
+                        margin-bottom: 0.35rem;
+                    ">
+                    <div id="supporterLastNameError" style="display: none; color: #dc2626; font-size: 0.8rem; margin-bottom: 0.75rem;">Input is required.</div>
+                    <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; margin-top: 0.75rem; color: #475569;">
+                        <input type="checkbox" id="supporterAnonymousToggle" style="margin: 0;">
+                        <span>Support anonymously</span>
+                    </label>
+                </div>
+
+                <div id="supporterTeamFields" style="margin-bottom: 1rem; text-align: left; display: none;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #374151;">Team/Organization name</label>
+                    <input id="supporterTeamNameInput" type="text" placeholder="Team or organization name" required aria-required="true" style="
+                        width: 100%;
+                        padding: 0.75rem 0.85rem;
+                        border: 1px solid #cbd5f5;
+                        border-radius: 10px;
+                        font-size: 0.95rem;
+                        outline: none;
+                        margin-bottom: 0.35rem;
+                    ">
+                    <div id="supporterTeamNameError" style="display: none; color: #dc2626; font-size: 0.8rem; margin-bottom: 0.75rem;">Input is required.</div>
+                </div>
+
+                <div style="margin-bottom: 1rem; text-align: left;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #374151;">Contact number</label>
+                    <input id="supporterContactNumberInput" type="tel" inputmode="numeric" maxlength="11" pattern="[0-9]{11}" placeholder="Contact number" required aria-required="true" style="
+                        width: 100%;
+                        padding: 0.75rem 0.85rem;
+                        border: 1px solid #cbd5f5;
+                        border-radius: 10px;
+                        font-size: 0.95rem;
+                        outline: none;
+                        margin-bottom: 0.35rem;
+                    ">
+                    <div id="supporterContactError" style="display: none; color: #dc2626; font-size: 0.8rem; margin-bottom: 0.75rem;">Input is required.</div>
+                </div>
+
+                <div style="margin-bottom: 1rem; text-align: left;">
+                    <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: #475569;">
+                        <input type="checkbox" id="supporterPrivacyConsent" style="margin: 0;">
+                        <span>I consent to the collection and use of this information for coordination.</span>
+                    </label>
+                    <div id="supporterPrivacyError" style="display: none; color: #dc2626; font-size: 0.8rem; margin-top: 0.35rem;">Consent is required.</div>
+                </div>
+
+                <div style="display: flex; gap: 0.75rem; justify-content: center;">
+                    <button id="donorSupporterCancel" style="
+                        background: #e2e8f0;
+                        color: #0f172a;
+                        border: none;
+                        padding: 0.7rem 1.4rem;
+                        border-radius: 10px;
+                        cursor: pointer;
+                        font-weight: 600;
+                    ">Cancel</button>
+                    <button id="donorSupporterConfirm" style="
+                        background: #22c55e;
+                        color: white;
+                        border: none;
+                        padding: 0.7rem 1.4rem;
+                        border-radius: 10px;
+                        cursor: pointer;
+                        font-weight: 600;
+                    ">Confirm Support</button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+
+        const supporterTypeInputs = modal.querySelectorAll('input[name="supporterType"]');
+        const individualFields = modal.querySelector('#supporterIndividualFields');
+        const teamFields = modal.querySelector('#supporterTeamFields');
+        const anonymousToggle = modal.querySelector('#supporterAnonymousToggle');
+        const firstNameInput = modal.querySelector('#supporterFirstNameInput');
+        const lastNameInput = modal.querySelector('#supporterLastNameInput');
+        const teamNameInput = modal.querySelector('#supporterTeamNameInput');
+        const contactInput = modal.querySelector('#supporterContactNumberInput');
+        const confirmBtn = modal.querySelector('#donorSupporterConfirm');
+        const cancelBtn = modal.querySelector('#donorSupporterCancel');
+
+        const firstNameError = modal.querySelector('#supporterFirstNameError');
+        const lastNameError = modal.querySelector('#supporterLastNameError');
+        const teamNameError = modal.querySelector('#supporterTeamNameError');
+        const contactError = modal.querySelector('#supporterContactError');
+        const privacyConsent = modal.querySelector('#supporterPrivacyConsent');
+        const privacyError = modal.querySelector('#supporterPrivacyError');
+        const allInputs = [firstNameInput, lastNameInput, teamNameInput, contactInput];
+        const errorMap = new Map([
+            [firstNameInput, firstNameError],
+            [lastNameInput, lastNameError],
+            [teamNameInput, teamNameError],
+            [contactInput, contactError]
+        ]);
+
+        const resetFieldStyle = (input) => {
+            if (!input) {
+                return;
+            }
+            input.style.borderColor = '#cbd5f5';
+            const error = errorMap.get(input);
+            if (error) {
+                error.style.display = 'none';
+            }
+        };
+
+        const markInvalid = (input) => {
+            if (!input) {
+                return;
+            }
+            input.style.borderColor = '#dc3545';
+            const error = errorMap.get(input);
+            if (error) {
+                error.style.display = 'block';
+            }
+        };
+
+        const setPrivacyErrorVisible = (isVisible) => {
+            if (privacyError) {
+                privacyError.style.display = isVisible ? 'block' : 'none';
+            }
+        };
+
+        const setConfirmButtonState = (isEnabled) => {
+            if (!confirmBtn) {
+                return;
+            }
+            confirmBtn.disabled = !isEnabled;
+            confirmBtn.style.background = isEnabled ? '#22c55e' : '#cbd5e1';
+            confirmBtn.style.cursor = isEnabled ? 'pointer' : 'not-allowed';
+            confirmBtn.style.color = isEnabled ? '#ffffff' : '#64748b';
+        };
+
+        const getSelectedType = () => {
+            const selected = modal.querySelector('input[name="supporterType"]:checked');
+            return selected ? selected.value : 'individual';
+        };
+
+        const getFormState = () => {
+            const supporterType = getSelectedType();
+            const isAnonymous = supporterType === 'individual' && anonymousToggle && anonymousToggle.checked;
+            return { supporterType, isAnonymous };
+        };
+
+        const getRequiredInputs = ({ supporterType, isAnonymous }) => {
+            if (isAnonymous) {
+                return [contactInput];
+            }
+            if (supporterType === 'individual') {
+                return [firstNameInput, lastNameInput, contactInput];
+            }
+            return [teamNameInput, contactInput];
+        };
+
+        const CONTACT_NUMBER_PATTERN = /^\d{11}$/;
+
+        const getContactValidationMessage = (value) => {
+            if (!value) {
+                return 'Input is required.';
+            }
+            if (!CONTACT_NUMBER_PATTERN.test(value)) {
+                return 'Contact number must be 11 digits.';
+            }
+            return '';
+        };
+
+        const validateContactInput = (showErrors = false) => {
+            if (!contactInput) {
+                return true;
+            }
+            const message = getContactValidationMessage(contactInput.value.trim());
+            if (message) {
+                if (showErrors) {
+                    if (contactError) {
+                        contactError.textContent = message;
+                    }
+                    markInvalid(contactInput);
+                }
+                return false;
+            }
+            if (showErrors) {
+                resetFieldStyle(contactInput);
+                if (contactError) {
+                    contactError.textContent = 'Input is required.';
+                }
+            }
+            return true;
+        };
+
+        const validateForm = (showErrors = false) => {
+            const { supporterType, isAnonymous } = getFormState();
+            const requiredInputs = getRequiredInputs({ supporterType, isAnonymous }).filter(Boolean);
+            let isValid = true;
+
+            requiredInputs.forEach((input) => {
+                if (input === contactInput) {
+                    const contactValid = validateContactInput(showErrors);
+                    if (!contactValid) {
+                        isValid = false;
+                    }
+                    return;
+                }
+
+                const hasValue = Boolean(input && input.value.trim());
+                if (!hasValue) {
+                    isValid = false;
+                    if (showErrors) {
+                        markInvalid(input);
+                    }
+                } else if (showErrors) {
+                    resetFieldStyle(input);
+                }
+            });
+
+            if (showErrors) {
+                allInputs.forEach((input) => {
+                    if (input && !requiredInputs.includes(input)) {
+                        resetFieldStyle(input);
+                    }
+                });
+            }
+
+            const consentChecked = privacyConsent ? privacyConsent.checked : true;
+            if (!consentChecked) {
+                isValid = false;
+                if (showErrors) {
+                    setPrivacyErrorVisible(true);
+                }
+            } else {
+                setPrivacyErrorVisible(false);
+            }
+
+            setConfirmButtonState(isValid);
+            return { isValid, supporterType, isAnonymous };
+        };
+
+        const handleFieldInput = (input) => {
+            resetFieldStyle(input);
+            validateForm();
+        };
+
+        const handleFieldBlur = (input) => {
+            const { supporterType, isAnonymous } = getFormState();
+            const requiredInputs = getRequiredInputs({ supporterType, isAnonymous });
+            if (input === contactInput) {
+                validateContactInput(true);
+                validateForm();
+                return;
+            }
+            if (requiredInputs.includes(input) && input && !input.value.trim()) {
+                markInvalid(input);
+            } else {
+                resetFieldStyle(input);
+            }
+            validateForm();
+        };
+
+        const updateAnonymousState = () => {
+            const isAnonymous = getSelectedType() === 'individual' && anonymousToggle && anonymousToggle.checked;
+            [firstNameInput, lastNameInput].forEach((input) => {
+                if (!input) {
+                    return;
+                }
+                input.disabled = isAnonymous;
+                if (isAnonymous) {
+                    input.value = '';
+                }
+            });
+            if (contactInput) {
+                contactInput.disabled = false;
+            }
+            if (isAnonymous) {
+                [firstNameInput, lastNameInput].forEach((input) => resetFieldStyle(input));
+            }
+            validateForm();
+        };
+
+        const updateSupporterType = (type) => {
+            const isIndividual = type === 'individual';
+            if (individualFields) {
+                individualFields.style.display = isIndividual ? 'block' : 'none';
+            }
+            if (teamFields) {
+                teamFields.style.display = isIndividual ? 'none' : 'block';
+            }
+            if (!isIndividual && anonymousToggle) {
+                anonymousToggle.checked = false;
+            }
+            if (isIndividual) {
+                resetFieldStyle(teamNameInput);
+            } else {
+                resetFieldStyle(firstNameInput);
+                resetFieldStyle(lastNameInput);
+            }
+            updateAnonymousState();
+        };
+
+        supporterTypeInputs.forEach((input) => {
+            input.addEventListener('change', () => updateSupporterType(input.value));
+        });
+
+        if (anonymousToggle) {
+            anonymousToggle.addEventListener('change', updateAnonymousState);
+        }
+
+        [firstNameInput, lastNameInput, teamNameInput, contactInput].forEach((input) => {
+            if (input) {
+                input.addEventListener('input', () => handleFieldInput(input));
+                input.addEventListener('blur', () => handleFieldBlur(input));
+            }
+        });
+
+        if (privacyConsent) {
+            privacyConsent.addEventListener('change', () => {
+                setPrivacyErrorVisible(false);
+                validateForm();
+            });
+        }
+
+        const cleanup = () => {
+            document.removeEventListener('keydown', handleEscape);
+            modal.remove();
+        };
+
+        const handleCancel = () => {
+            cleanup();
+            resolve(null);
+        };
+
+        const handleConfirm = () => {
+            const { isValid, supporterType, isAnonymous } = validateForm(true);
+            if (!isValid) {
+                const firstInvalid = modal.querySelector('input[style*="#dc3545"]');
+                if (firstInvalid) {
+                    firstInvalid.focus();
+                } else if (privacyConsent && !privacyConsent.checked) {
+                    privacyConsent.focus();
+                }
+                return;
+            }
+
+            const firstName = firstNameInput ? firstNameInput.value.trim() : '';
+            const lastName = lastNameInput ? lastNameInput.value.trim() : '';
+            const teamNameValue = teamNameInput ? teamNameInput.value.trim() : '';
+            const contactValue = contactInput ? contactInput.value.trim() : '';
+
+            const displayName = isAnonymous
+                ? 'Anonymous'
+                : supporterType === 'team'
+                    ? teamNameValue
+                    : `${firstName} ${lastName}`.trim();
+
+            cleanup();
+            resolve({
+                type: supporterType,
+                isAnonymous,
+                firstName: isAnonymous ? '' : firstName,
+                lastName: isAnonymous ? '' : lastName,
+                teamName: supporterType === 'team' ? teamNameValue : '',
+                contact: contactValue,
+                displayName
+            });
+        };
+
+        const handleEscape = (event) => {
+            if (event.key === 'Escape') {
+                handleCancel();
+            }
+            if (event.key === 'Enter' && modal.contains(document.activeElement)) {
+                handleConfirm();
+            }
+        };
+
+        confirmBtn.addEventListener('click', handleConfirm);
+        cancelBtn.addEventListener('click', handleCancel);
+        modal.addEventListener('click', (event) => {
+            if (event.target === modal) {
+                handleCancel();
+            }
+        });
+        document.addEventListener('keydown', handleEscape);
+
+        if (firstNameInput) {
+            firstNameInput.value = defaultFirstName;
+        }
+        if (lastNameInput) {
+            lastNameInput.value = defaultLastName;
+        }
+        if (teamNameInput) {
+            teamNameInput.value = teamName;
+        }
+
+        updateSupporterType(preferTeam ? 'team' : 'individual');
+
+        if (preferTeam && teamNameInput) {
+            teamNameInput.focus();
+            teamNameInput.select();
+        } else if (firstNameInput) {
+            firstNameInput.focus();
+            firstNameInput.select();
+        }
+    });
+}
+
 // Custom confirmation dialog for chat message deletion
 function showChatDeleteConfirm() {
     return new Promise((resolve) => {
@@ -314,9 +996,18 @@ let map;
 let markerLayers = {};
 let userReportedLocations = [];
 let isReportingMode = false;
+let isSupportModeActive = false;
 let pendingReportCoords = null;
+let confirmLocationContext = null;
+let confirmedLocationName = '';
+let donationPinLabel = '';
+let donationPinModeActive = false;
+let donationTempMarker = null;
+let donationUploadedImages = [];
 let confirmMiniMap = null;
 let confirmMiniMapMarker = null;
+let pendingDonationSelection = null;
+let donationConfirmedLocationId = '';
 let marilaoBoundsOutline = null;
 let marilaoBoundaryLayer = null;
 let mapDefaultBounds = null;
@@ -352,6 +1043,16 @@ function initFirebase() {
         updateSyncStatus('offline', 'Local only');
         return false;
     }
+}
+
+async function saveDonationLogToFirestore(donationLog) {
+    if (!db) {
+        throw new Error('Firestore not initialized');
+    }
+
+    const { addDoc, collection } = await import('https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js');
+    const docRef = await addDoc(collection(db, 'donation-logs'), donationLog);
+    return docRef.id;
 }
 
 async function addMarilaoBoundaryLayer() {
@@ -930,6 +1631,70 @@ function setupEventListeners() {
         resetMapViewBtn.addEventListener('click', resetMapView);
     }
 
+    // Info panel buttons
+    const infoPanel = document.getElementById('infoPanel');
+    const infoBackdrop = document.getElementById('infoPanelBackdrop');
+    const startGuestSessionBtn = document.getElementById('startGuestSession');
+
+    const hideInfoPanel = () => {
+        console.log('hideInfoPanel called');
+        if (infoPanel) {
+            infoPanel.style.display = 'none';
+            console.log('Info panel hidden');
+        } else {
+            console.log('Info panel not found');
+        }
+        if (infoBackdrop) {
+            infoBackdrop.classList.remove('is-visible');
+            console.log('Info backdrop hidden');
+        } else {
+            console.log('Info backdrop not found');
+        }
+    };
+
+    // Info panel close button
+    const closeInfoBtn = document.getElementById('closeInfo');
+    if (closeInfoBtn) {
+        closeInfoBtn.addEventListener('click', hideInfoPanel);
+    }
+
+    if (infoBackdrop) {
+        infoBackdrop.addEventListener('click', hideInfoPanel);
+    }
+
+    if (startGuestSessionBtn) {
+        console.log('Start Guest Session button found, adding event listener');
+        startGuestSessionBtn.addEventListener('click', (e) => {
+            console.log('Start Guest Session button clicked!');
+            console.log('Event object:', e);
+            console.log('Button element:', startGuestSessionBtn);
+            e.preventDefault();
+            e.stopPropagation();
+
+            try {
+                console.log('Calling ensureGuestSession...');
+                const result = ensureGuestSession({ showAlert: true });
+                console.log('ensureGuestSession returned:', result);
+
+                console.log('Calling hideInfoPanel...');
+                hideInfoPanel();
+                console.log('hideInfoPanel completed');
+            } catch (error) {
+                console.error('Error in Start Guest Session click handler:', error);
+                alert('Error starting guest session: ' + error.message);
+            }
+        });
+    } else {
+        console.log('Start Guest Session button NOT found!');
+    }
+
+    // Hero CTA button (hide info panel) - exclude startGuestSessionBtn
+    document.querySelectorAll('.info-start-btn').forEach((button) => {
+        if (button.id !== 'startGuestSession') {
+            button.addEventListener('click', hideInfoPanel);
+        }
+    });
+
     // Modal event listeners
     const closeReportModalBtn = document.getElementById('closeReportModal');
     if (closeReportModalBtn) {
@@ -944,6 +1709,34 @@ function setupEventListeners() {
     const reportForm = document.getElementById('reportForm');
     if (reportForm) {
         reportForm.addEventListener('submit', submitLocationReport);
+    }
+
+    // Urgency button event listeners
+    const urgencyButtons = document.querySelectorAll('.urgency-btn');
+    const urgencyLevelInput = document.getElementById('urgencyLevel');
+
+    if (urgencyButtons.length > 0 && urgencyLevelInput) {
+        urgencyButtons.forEach(button => {
+            button.addEventListener('click', function () {
+                // Remove selected class from all buttons
+                urgencyButtons.forEach(btn => btn.classList.remove('selected'));
+
+                // Add selected class to clicked button
+                this.classList.add('selected');
+
+                // Set the hidden input value
+                const urgencyValue = this.getAttribute('data-urgency');
+                urgencyLevelInput.value = urgencyValue;
+
+                // Optional: Add visual feedback
+                console.log('Urgency selected:', urgencyValue);
+            });
+        });
+    }
+
+    const donationLogForm = document.getElementById('donationLogForm');
+    if (donationLogForm) {
+        donationLogForm.addEventListener('submit', submitDonationLog);
     }
 
     // Confirm location modal listeners
@@ -988,6 +1781,8 @@ function setupEventListeners() {
 
     // Image upload functionality
     setupImageUpload();
+    setupDonationImageUpload();
+    bindDonationModalControls();
 
 
     // Close modal when clicking outside
@@ -996,6 +1791,15 @@ function setupEventListeners() {
         reportModal.addEventListener('click', (e) => {
             if (e.target.id === 'reportModal') {
                 closeReportModal();
+            }
+        });
+    }
+
+    const donationLogModal = document.getElementById('donationLogModal');
+    if (donationLogModal) {
+        donationLogModal.addEventListener('click', (event) => {
+            if (event.target.id === 'donationLogModal') {
+                closeDonationLogModal();
             }
         });
     }
@@ -1033,7 +1837,16 @@ function setupEventListeners() {
     const sidebarOverlay = document.getElementById('sidebarOverlay');
     const sidebarClose = document.getElementById('sidebarClose');
     const sidebarReportLocation = document.getElementById('sidebarReportLocation');
+    const sidebarSupportLocation = document.getElementById('sidebarSupportLocation');
+    const sidebarLogDonation = document.getElementById('sidebarLogDonation');
+    // Activity Logs is now a direct link to user-dashboard.html
+    const activityLogModal = document.getElementById('activityLogModal');
+    const closeActivityLogModalBtn = document.getElementById('closeActivityLogModal');
     const reachedViewToggle = document.getElementById('reachedViewToggle');
+    const unreachedSearch = document.getElementById('unreachedSearch');
+    const unreachedFilter = document.getElementById('unreachedFilter');
+    const claimsSearch = document.getElementById('claimsSearch');
+    const claimsFilter = document.getElementById('claimsFilter');
 
     const moveFocusOutsideSidebar = () => {
         if (!sidebarPanel) {
@@ -1099,39 +1912,54 @@ function setupEventListeners() {
         });
     }
 
+    if (sidebarSupportLocation) {
+        sidebarSupportLocation.addEventListener('click', () => {
+            closeSidebar();
+            startSupportMode();
+        });
+    }
+
+    if (sidebarLogDonation) {
+        sidebarLogDonation.addEventListener('click', () => {
+            closeSidebar();
+            openDonationLogModal();
+        });
+    }
+
+    // Activity Logs is now a direct link to user-dashboard.html
+
+    if (closeActivityLogModalBtn) {
+        closeActivityLogModalBtn.addEventListener('click', closeActivityLogModal);
+    }
+
+    if (activityLogModal) {
+        activityLogModal.addEventListener('click', (event) => {
+            if (event.target.id === 'activityLogModal') {
+                closeActivityLogModal();
+            }
+        });
+    }
+
     if (reachedViewToggle) {
         reachedViewToggle.addEventListener('change', (event) => {
             setReachedViewActive(event.target.checked);
         });
     }
 
+    if (window.isDonorMap) {
+        [unreachedSearch, claimsSearch].forEach((input) => {
+            if (input) {
+                input.addEventListener('input', updateDonorDashboardOverview);
+            }
+        });
 
-    const infoPanel = document.getElementById('infoPanel');
-    const infoBackdrop = document.getElementById('infoPanelBackdrop');
-
-    const hideInfoPanel = () => {
-        if (infoPanel) {
-            infoPanel.style.display = 'none';
-        }
-        if (infoBackdrop) {
-            infoBackdrop.classList.remove('is-visible');
-        }
-    };
-
-    // Info panel close button
-    const closeInfoBtn = document.getElementById('closeInfo');
-    if (closeInfoBtn) {
-        closeInfoBtn.addEventListener('click', hideInfoPanel);
+        [unreachedFilter, claimsFilter].forEach((select) => {
+            if (select) {
+                select.addEventListener('change', updateDonorDashboardOverview);
+            }
+        });
     }
 
-    if (infoBackdrop) {
-        infoBackdrop.addEventListener('click', hideInfoPanel);
-    }
-
-    // Hero CTA button (hide info panel)
-    document.querySelectorAll('.info-start-btn').forEach((button) => {
-        button.addEventListener('click', hideInfoPanel);
-    });
 
     // Hide search suggestions when clicking on map
     document.addEventListener('click', (e) => {
@@ -2644,6 +3472,75 @@ function handleReportingModeKeydown(e) {
     }
 }
 
+function startSupportMode() {
+    if (isSupportModeActive) {
+        return;
+    }
+
+    if (isReportingMode) {
+        cancelReportingMode();
+    }
+
+    if (donationPinModeActive) {
+        cancelDonationPinMode({ reopenModal: true });
+    }
+
+    isSupportModeActive = true;
+    document.body.classList.add('support-mode');
+
+    const existingInstruction = document.getElementById('supportModeInstruction');
+    if (existingInstruction) {
+        existingInstruction.remove();
+    }
+
+    const instruction = document.createElement('div');
+    instruction.id = 'supportModeInstruction';
+    instruction.className = 'click-to-mark-instruction';
+    instruction.innerHTML = `
+        <h4><i class="fas fa-hand-holding-heart"></i> Support a Location</h4>
+        <p>Click a map pin to claim it and mark the response as on the way.</p>
+        <div class="instruction-actions">
+            <button type="button" class="btn btn-secondary btn-sm" id="cancelSupportMode">
+                <i class="fas fa-times"></i> Cancel
+            </button>
+        </div>
+        <div class="esc-hint">
+            <i class="fas fa-keyboard"></i> Press ESC to cancel
+        </div>
+    `;
+    document.body.appendChild(instruction);
+
+    const cancelButton = document.getElementById('cancelSupportMode');
+    if (cancelButton) {
+        cancelButton.addEventListener('click', cancelSupportMode);
+    }
+
+    document.addEventListener('keydown', handleSupportModeKeydown);
+}
+
+function cancelSupportMode() {
+    if (!isSupportModeActive) {
+        return;
+    }
+
+    isSupportModeActive = false;
+    document.body.classList.remove('support-mode');
+
+    const instruction = document.getElementById('supportModeInstruction');
+    if (instruction) {
+        instruction.remove();
+    }
+
+    document.removeEventListener('keydown', handleSupportModeKeydown);
+}
+
+function handleSupportModeKeydown(event) {
+    if (event.key === 'Escape' && isSupportModeActive) {
+        event.preventDefault();
+        cancelSupportMode();
+    }
+}
+
 function handleMapClickForReport(e) {
     pendingReportCoords = e.latlng;
     cancelReportingMode();
@@ -2671,7 +3568,18 @@ function handleMapClickForReport(e) {
     openConfirmLocationModal(e.latlng);
 }
 
-function openConfirmLocationModal(coords) {
+function openConfirmLocationModal(coords, options = {}) {
+    const {
+        context = 'report',
+        onConfirm = null,
+        onCancel = null,
+        label = ''
+    } = options;
+    confirmLocationContext = {
+        type: context,
+        onConfirm,
+        onCancel
+    };
     const details = document.getElementById('confirmLocationDetails');
     if (details && coords) {
         const formatted = `Lat: ${coords.lat.toFixed(6)}, Lng: ${coords.lng.toFixed(6)}`;
@@ -2688,7 +3596,7 @@ function openConfirmLocationModal(coords) {
         modal.style.display = 'flex';
     }
     updateConfirmPanelLayout(true);
-    updateConfirmLocationName(coords);
+    updateConfirmLocationName(coords, label);
     updateConfirmLocationPreview(coords);
 }
 
@@ -2711,7 +3619,7 @@ function updateConfirmPanelLayout(isOpen) {
     }
 }
 
-function updateConfirmLocationName(coords) {
+function updateConfirmLocationName(coords, label = '') {
     const nameEl = document.getElementById('confirmLocationName');
     const textEl = nameEl ? nameEl.querySelector('.confirm-location-name-text') : null;
 
@@ -2719,15 +3627,24 @@ function updateConfirmLocationName(coords) {
         return;
     }
 
+    if (label) {
+        textEl.textContent = `Location: ${label}`;
+        confirmedLocationName = label;
+        return;
+    }
+
     textEl.textContent = 'Location: Looking up...';
 
     fetchConfirmLocationName(coords)
         .then((name) => {
-            textEl.textContent = `Location: ${name || 'Unnamed location'}`;
+            const displayName = name || 'Unnamed location';
+            textEl.textContent = `Location: ${displayName}`;
+            confirmedLocationName = displayName;
         })
         .catch((error) => {
             console.warn('Failed to resolve location name:', error);
             textEl.textContent = 'Location: Unable to resolve';
+            confirmedLocationName = 'Unable to resolve';
         });
 }
 
@@ -2927,8 +3844,25 @@ function closeConfirmLocationModal() {
 }
 
 function confirmLocationAndOpenReport() {
+    const context = confirmLocationContext;
+    confirmLocationContext = null;
     closeConfirmLocationModal();
     document.body.classList.remove('pinning-focus');
+    if (context && context.type === 'donation') {
+        if (typeof context.onConfirm === 'function') {
+            context.onConfirm();
+        }
+        return;
+    }
+
+    // Show and populate the chosen location display
+    const chosenLocationDisplay = document.getElementById('chosenLocationDisplay');
+    const chosenLocationName = document.getElementById('chosenLocationName');
+    if (chosenLocationDisplay && chosenLocationName && confirmedLocationName) {
+        chosenLocationDisplay.style.display = 'block';
+        chosenLocationName.textContent = confirmedLocationName;
+    }
+
     const reportModal = document.getElementById('reportModal');
     if (reportModal) {
         reportModal.style.display = 'flex';
@@ -2936,7 +3870,17 @@ function confirmLocationAndOpenReport() {
 }
 
 function chooseDifferentLocation() {
+    const context = confirmLocationContext;
+    confirmLocationContext = null;
     closeConfirmLocationModal();
+
+    if (context && context.type === 'donation') {
+        document.body.classList.remove('pinning-focus');
+        if (typeof context.onCancel === 'function') {
+            context.onCancel();
+        }
+        return;
+    }
 
     if (window.tempReportMarker) {
         map.removeLayer(window.tempReportMarker);
@@ -2969,6 +3913,12 @@ function closeReportModal() {
         clearUploadedImages();
     }
 
+    // Hide the chosen location display
+    const chosenLocationDisplay = document.getElementById('chosenLocationDisplay');
+    if (chosenLocationDisplay) {
+        chosenLocationDisplay.style.display = 'none';
+    }
+
     // Remove temporary marker
     if (window.tempReportMarker) {
         map.removeLayer(window.tempReportMarker);
@@ -2979,6 +3929,984 @@ function closeReportModal() {
     window.currentSearchResult = null;
 
     pendingReportCoords = null;
+    confirmedLocationName = '';
+}
+
+function updateDonationDonorFields() {
+    const isOrganization = document.getElementById('donorTypeOrganization')?.checked;
+    const individualField = document.getElementById('donorIndividualField');
+    const organizationField = document.getElementById('donorOrganizationField');
+    const individualInput = document.getElementById('donorFullName');
+    const organizationInput = document.getElementById('donorOrganizationName');
+
+    if (isOrganization) {
+        if (individualField) {
+            individualField.hidden = true;
+        }
+        if (organizationField) {
+            organizationField.hidden = false;
+        }
+        if (individualInput) {
+            individualInput.disabled = true;
+            individualInput.required = false;
+        }
+        if (organizationInput) {
+            organizationInput.disabled = false;
+            organizationInput.required = true;
+        }
+        return;
+    }
+
+    if (individualField) {
+        individualField.hidden = false;
+    }
+    if (organizationField) {
+        organizationField.hidden = true;
+    }
+    if (individualInput) {
+        individualInput.disabled = false;
+        individualInput.required = true;
+    }
+    if (organizationInput) {
+        organizationInput.disabled = true;
+        organizationInput.required = false;
+    }
+}
+
+function updateDonationLocationModeFields(options = {}) {
+    const { preserveSelection = false } = options;
+    const selectedMode = document.querySelector('input[name="donationLocationMode"]:checked');
+    const selectedValue = selectedMode ? selectedMode.value : '';
+    const unreachedCard = document.getElementById('donationOptionUnreached');
+    const pinCard = document.getElementById('donationOptionPin');
+    const locationSelect = document.getElementById('donationLocationSelect');
+    const pinButton = document.getElementById('donationPinLocationBtn');
+    const hadSelectedLocation = Boolean(locationSelect && locationSelect.value);
+    if (!selectedValue) {
+        if (unreachedCard) {
+            unreachedCard.hidden = true;
+        }
+        if (pinCard) {
+            pinCard.hidden = true;
+        }
+        if (locationSelect) {
+            locationSelect.disabled = true;
+            locationSelect.required = false;
+        }
+        if (pinButton) {
+            pinButton.disabled = true;
+        }
+        return;
+    }
+
+    const isUnreached = selectedValue === 'unreached';
+    if (unreachedCard) {
+        unreachedCard.hidden = !isUnreached;
+    }
+    if (pinCard) {
+        pinCard.hidden = isUnreached;
+    }
+    if (locationSelect) {
+        locationSelect.disabled = !isUnreached;
+        locationSelect.required = isUnreached;
+        if (!isUnreached) {
+            locationSelect.value = '';
+        }
+    }
+    if (pinButton) {
+        pinButton.disabled = isUnreached;
+    }
+    if (isUnreached) {
+        if (!preserveSelection) {
+            clearDonationPinSelection();
+        }
+    } else if (hadSelectedLocation) {
+        clearDonationPinSelection();
+    } else if (!donationPinCoords) {
+        const preview = document.getElementById('donationPinPreview');
+        if (preview) {
+            preview.innerHTML = '<span class="donation-pin-label">No pin selected yet.</span>';
+        }
+    }
+}
+
+function getDonationDonorType() {
+    const selected = document.querySelector('input[name="donorType"]:checked');
+    return selected ? selected.value : 'individual';
+}
+
+function getDonationDonorName() {
+    const donorType = getDonationDonorType();
+    const individualInput = document.getElementById('donorFullName');
+    const organizationInput = document.getElementById('donorOrganizationName');
+
+    if (donorType === 'organization') {
+        return organizationInput ? organizationInput.value.trim() : '';
+    }
+
+    return individualInput ? individualInput.value.trim() : '';
+}
+
+function normalizeCashAmountValue(value) {
+    if (!value) {
+        return '';
+    }
+
+    const cleaned = value.replace(/,/g, '').replace(/[^\d.]/g, '');
+    const decimalIndex = cleaned.indexOf('.');
+    if (decimalIndex === -1) {
+        return cleaned;
+    }
+
+    return `${cleaned.slice(0, decimalIndex + 1)}${cleaned
+        .slice(decimalIndex + 1)
+        .replace(/\./g, '')}`;
+}
+
+function formatCashAmountInput(value) {
+    const cleaned = normalizeCashAmountValue(value);
+    if (!cleaned) {
+        return '';
+    }
+
+    const parts = cleaned.split('.');
+    const integerPart = parts[0] || '0';
+    const decimalPart = parts[1] ? parts[1].slice(0, 2) : '';
+    const formattedInteger = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+
+    if (cleaned.includes('.')) {
+        return `${formattedInteger}.${decimalPart}`;
+    }
+
+    return formattedInteger;
+}
+
+function formatCashAmountFinal(value) {
+    const cleaned = normalizeCashAmountValue(value);
+    const numericValue = parseFloat(cleaned);
+    if (!Number.isFinite(numericValue)) {
+        return cleaned ? formatCashAmountInput(cleaned) : '';
+    }
+
+    return numericValue.toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    });
+}
+
+function setupDonationCashAmountInput() {
+    const cashInput = document.getElementById('donationCashAmount');
+    if (!cashInput || cashInput.dataset.currencyBound === 'true') {
+        return;
+    }
+
+    cashInput.dataset.currencyBound = 'true';
+
+    cashInput.addEventListener('input', () => {
+        const oldValue = cashInput.value;
+        const formattedValue = formatCashAmountInput(oldValue);
+        if (formattedValue === oldValue) {
+            return;
+        }
+
+        const selectionStart = cashInput.selectionStart ?? oldValue.length;
+        const lengthDelta = formattedValue.length - oldValue.length;
+        cashInput.value = formattedValue;
+        const newPosition = Math.max(selectionStart + lengthDelta, 0);
+        cashInput.setSelectionRange(newPosition, newPosition);
+    });
+
+    cashInput.addEventListener('blur', () => {
+        cashInput.value = formatCashAmountFinal(cashInput.value);
+    });
+}
+
+function openDonationLogModal(options = {}) {
+    const { preserveSelection = false } = options;
+    const modal = document.getElementById('donationLogModal');
+    if (modal) {
+        modal.style.display = 'flex';
+    }
+    updateDonationDonorFields();
+    refreshDonationLocationOptions();
+    updateDonationLocationModeFields({ preserveSelection });
+}
+
+function closeDonationLogModal(options = {}) {
+    const { preserveForm = false } = options;
+    const modal = document.getElementById('donationLogModal');
+    const form = document.getElementById('donationLogForm');
+
+    if (modal) {
+        modal.style.display = 'none';
+    }
+
+    if (form && !preserveForm) {
+        form.reset();
+        const donationItems = document.getElementById('donationItems');
+        if (donationItems) {
+            donationItems.innerHTML = '';
+        }
+    }
+
+    if (!preserveForm) {
+        clearDonationImages();
+        clearDonationPinSelection();
+    }
+}
+
+function openActivityLogModal() {
+    const modal = document.getElementById('activityLogModal');
+    if (modal) {
+        modal.style.display = 'flex';
+    }
+    updateActivityLogDisplay();
+}
+
+function closeActivityLogModal() {
+    const modal = document.getElementById('activityLogModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+function formatActivityTimestamp(timestamp) {
+    if (!timestamp) {
+        return '';
+    }
+
+    const date = new Date(timestamp);
+    if (Number.isNaN(date.getTime())) {
+        return '';
+    }
+
+    return date.toLocaleString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit'
+    });
+}
+
+function buildActivityLogItem(activity) {
+    if (!activity) {
+        return '';
+    }
+
+    const activityType = activity.type || 'report';
+    const typeConfig = {
+        report: { label: 'Report Submitted', icon: 'fa-map-pin', accent: '#0f766e' },
+        donation: { label: 'Donation Logged', icon: 'fa-hand-holding-heart', accent: '#15803d' },
+        chat: { label: 'Relief Thread Message', icon: 'fa-comments', accent: '#2563eb' }
+    };
+    const config = typeConfig[activityType] || typeConfig.report;
+
+    let title = '';
+    let details = '';
+    const pills = [];
+
+    if (activityType === 'report') {
+        title = escapeHtml(activity.locationName || 'Reported location');
+        const urgency = activity.urgency ? escapeHtml(String(activity.urgency)) : '';
+        const needs = Array.isArray(activity.reliefNeeds)
+            ? activity.reliefNeeds.filter(Boolean).map(need => escapeHtml(String(need)))
+            : [];
+        if (urgency) {
+            pills.push(urgency.toUpperCase());
+        }
+        if (needs.length) {
+            details = `Needs: ${needs.join(', ')}`;
+        }
+    } else if (activityType === 'donation') {
+        title = escapeHtml(activity.locationName || 'Donation drop-off');
+        const donorName = escapeHtml(activity.donorName || 'Anonymous');
+        details = `Donor: ${donorName}`;
+        const itemCount = Number(activity.itemCount ?? activity.itemsCount);
+        if (Number.isFinite(itemCount) && itemCount > 0) {
+            pills.push(`${itemCount} item${itemCount !== 1 ? 's' : ''}`);
+        }
+        const cashAmount = Number(activity.cashAmount);
+        if (Number.isFinite(cashAmount) && cashAmount > 0) {
+            pills.push(`₱${cashAmount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+        }
+    } else if (activityType === 'chat') {
+        title = escapeHtml(activity.locationName || getLocationNameById(activity.locationId) || 'Relief thread');
+        const message = typeof activity.message === 'string' ? activity.message : '';
+        const safeMessage = escapeHtml(message);
+        const snippet = safeMessage.length > 140 ? `${safeMessage.slice(0, 140)}…` : safeMessage;
+        details = snippet ? `“${snippet}”` : 'Message sent.';
+    }
+
+    const detailsMarkup = details ? `<div class="activity-log-details">${details}</div>` : '';
+    const pillsMarkup = pills.length
+        ? `<div class="activity-log-meta">${pills.map(pill => `<span class="activity-log-pill">${pill}</span>`).join('')}</div>`
+        : '';
+
+    return `
+        <div class="activity-log-item" style="--activity-accent: ${config.accent}">
+            <div class="activity-log-header">
+                <div class="activity-log-type">
+                    <span class="activity-log-icon"><i class="fas ${config.icon}"></i></span>
+                    <span>${config.label}</span>
+                </div>
+                <span class="activity-log-time">${formatActivityTimestamp(activity.timestamp)}</span>
+            </div>
+            <div class="activity-log-title">${title}</div>
+            ${detailsMarkup}
+            ${pillsMarkup}
+        </div>
+    `;
+}
+
+function updateActivityLogDisplay() {
+    const guestId = getStoredGuestId();
+    const activityLogGuest = document.getElementById('activityLogGuest');
+    const activityLogCount = document.getElementById('activityLogCount');
+    const activityLogList = document.getElementById('activityLogList');
+    const activityLogEmpty = document.getElementById('activityLogEmpty');
+
+    if (activityLogGuest) {
+        activityLogGuest.textContent = guestId || '--';
+    }
+
+    if (!activityLogList) {
+        return;
+    }
+
+    if (!guestId) {
+        if (activityLogCount) {
+            activityLogCount.textContent = '0';
+        }
+        activityLogList.innerHTML = '';
+        if (activityLogEmpty) {
+            activityLogEmpty.textContent = 'Start exploring as guest to log reports, donations, and relief thread messages.';
+            activityLogEmpty.style.display = 'block';
+        }
+        return;
+    }
+
+    const activities = getGuestActivities()
+        .slice()
+        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+    if (activityLogCount) {
+        activityLogCount.textContent = String(activities.length);
+    }
+
+    if (!activities.length) {
+        activityLogList.innerHTML = '';
+        if (activityLogEmpty) {
+            activityLogEmpty.textContent = 'No activity yet. Your reports, donations, and relief thread messages will appear here.';
+            activityLogEmpty.style.display = 'block';
+        }
+        return;
+    }
+
+    if (activityLogEmpty) {
+        activityLogEmpty.style.display = 'none';
+    }
+
+    activityLogList.innerHTML = activities.map(buildActivityLogItem).join('');
+}
+
+function refreshDonationLocationOptions() {
+    const donationLocationSelect = document.getElementById('donationLocationSelect');
+    if (!donationLocationSelect) {
+        return;
+    }
+
+    const selectedValue = donationLocationSelect.value;
+    const supportedLocations = Array.isArray(userReportedLocations)
+        ? userReportedLocations.filter((location) => {
+            const status = getResponseStatusData(location);
+            if (!status.isReached && !status.isOnTheWay) {
+                return false;
+            }
+            return isLocationSupportedByCurrentUser(location, status);
+        })
+        : [];
+
+    const placeholderText = supportedLocations.length
+        ? 'Select supported location...'
+        : 'No supported locations yet';
+    donationLocationSelect.innerHTML = `<option value="">${placeholderText}</option>`;
+
+    supportedLocations.forEach((location) => {
+        const option = document.createElement('option');
+        const identifier = location.firestoreId || location.id || '';
+        option.value = identifier;
+        option.textContent = location.name || 'Unnamed location';
+        option.dataset.coords = Array.isArray(location.coords) ? location.coords.join(',') : '';
+        donationLocationSelect.appendChild(option);
+    });
+
+    if (selectedValue) {
+        donationLocationSelect.value = selectedValue;
+    }
+}
+
+function setupDonationImageUpload() {
+    const uploadBtn = document.getElementById('donationPhotoUploadBtn');
+    const uploadInput = document.getElementById('donationPhotoUpload');
+
+    if (!uploadBtn || !uploadInput) {
+        return;
+    }
+
+    uploadBtn.addEventListener('click', () => uploadInput.click());
+    uploadInput.addEventListener('change', handleDonationImageSelection);
+}
+
+function handleDonationImageSelection(event) {
+    const files = Array.from(event.target.files || []);
+    const maxFileSize = 5 * 1024 * 1024;
+    const maxImages = 6;
+
+    files.forEach((file) => {
+        if (file.size > maxFileSize) {
+            systemAlert(`File "${file.name}" is too large. Maximum size is 5MB.`);
+            return;
+        }
+        if (!file.type.startsWith('image/')) {
+            systemAlert(`File "${file.name}" is not an image.`);
+            return;
+        }
+        if (donationUploadedImages.length >= maxImages) {
+            systemAlert(`Maximum ${maxImages} images allowed.`);
+            return;
+        }
+
+        compressImage(file, (compressedDataUrl) => {
+            donationUploadedImages.push({
+                id: Date.now() + Math.random(),
+                name: file.name,
+                data: compressedDataUrl,
+                size: file.size
+            });
+            updateDonationPhotoPreview();
+        });
+    });
+
+    event.target.value = '';
+}
+
+function updateDonationPhotoPreview() {
+    const preview = document.getElementById('donationPhotoPreview');
+    if (!preview) {
+        return;
+    }
+
+    preview.innerHTML = '';
+    donationUploadedImages.forEach((image) => {
+        const previewItem = document.createElement('div');
+        previewItem.className = 'image-preview-item';
+        previewItem.innerHTML = `
+            <img src="${image.data}" alt="${image.name}">
+            <button type="button" class="image-remove-btn" data-image-id="${image.id}" title="Remove image">
+                <i class="fas fa-times"></i>
+            </button>
+        `;
+        preview.appendChild(previewItem);
+    });
+
+    preview.querySelectorAll('.image-remove-btn').forEach((button) => {
+        button.addEventListener('click', () => {
+            const imageId = button.dataset.imageId;
+            donationUploadedImages = donationUploadedImages.filter(image => String(image.id) !== imageId);
+            updateDonationPhotoPreview();
+        });
+    });
+}
+
+function clearDonationImages() {
+    donationUploadedImages = [];
+    updateDonationPhotoPreview();
+}
+
+function clearDonationPinSelection() {
+    donationPinCoords = null;
+    donationPinLabel = '';
+    donationPinModeActive = false;
+    pendingDonationSelection = null;
+    donationConfirmedLocationId = '';
+
+    if (donationTempMarker && map) {
+        map.removeLayer(donationTempMarker);
+        donationTempMarker = null;
+    }
+
+    const preview = document.getElementById('donationPinPreview');
+    if (preview) {
+        preview.innerHTML = '<span class="donation-pin-label">No pin selected yet.</span>';
+    }
+}
+
+function setDonationPinPreview(label, coords) {
+    const preview = document.getElementById('donationPinPreview');
+    if (!preview) {
+        return;
+    }
+
+    const coordText = coords ? `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}` : '--';
+    preview.innerHTML = `
+        <span class="donation-pin-label">${label}</span>
+        <span class="donation-pin-coords">${coordText}</span>
+    `;
+}
+
+function confirmDonationLocationSelection() {
+    if (!pendingDonationSelection) {
+        openDonationLogModal({ preserveSelection: true });
+        return;
+    }
+
+    const { id, label, coords } = pendingDonationSelection;
+    donationPinCoords = coords;
+    donationPinLabel = label || 'Selected location';
+    donationConfirmedLocationId = id || '';
+    pendingDonationSelection = null;
+
+    const locationSelect = document.getElementById('donationLocationSelect');
+    if (locationSelect && donationConfirmedLocationId) {
+        locationSelect.value = donationConfirmedLocationId;
+    }
+
+    if (donationTempMarker && map) {
+        map.removeLayer(donationTempMarker);
+        donationTempMarker = null;
+    }
+
+    setDonationPinPreview(donationPinLabel, donationPinCoords);
+    document.body.classList.remove('pinning-focus');
+    openDonationLogModal({ preserveSelection: true });
+}
+
+function cancelDonationLocationSelection() {
+    const locationSelect = document.getElementById('donationLocationSelect');
+    if (locationSelect) {
+        locationSelect.value = donationConfirmedLocationId || '';
+    }
+    pendingDonationSelection = null;
+    document.body.classList.remove('pinning-focus');
+
+    if (donationConfirmedLocationId && donationPinCoords) {
+        setDonationPinPreview(donationPinLabel || 'Selected location', donationPinCoords);
+    } else {
+        clearDonationPinSelection();
+    }
+
+    openDonationLogModal({ preserveSelection: true });
+}
+
+function startDonationPinMode() {
+    if (!map) {
+        return;
+    }
+
+    donationPinModeActive = true;
+    document.body.classList.add('reporting-mode');
+    document.body.classList.add('pinning-focus');
+
+    const instruction = document.createElement('div');
+    instruction.id = 'donationPinInstruction';
+    instruction.className = 'click-to-mark-instruction';
+    instruction.innerHTML = `
+        <h4><i class="fas fa-location-dot"></i> Pin Drop-off Location</h4>
+        <p>Click anywhere on the map to mark the donation drop-off point.</p>
+        <div class="instruction-actions">
+            <button type="button" class="btn btn-secondary btn-sm" id="cancelDonationPin">
+                <i class="fas fa-times"></i> Cancel
+            </button>
+        </div>
+        <div class="esc-hint">
+            <i class="fas fa-keyboard"></i> Press ESC to cancel
+        </div>
+    `;
+    document.body.appendChild(instruction);
+
+    map.once('click', handleDonationPinClick);
+    document.addEventListener('keydown', handleDonationPinKeydown);
+
+    const cancelButton = document.getElementById('cancelDonationPin');
+    if (cancelButton) {
+        cancelButton.addEventListener('click', cancelDonationPinMode);
+    }
+}
+
+function handleDonationPinClick(event) {
+    if (!event || !event.latlng) {
+        return;
+    }
+
+    donationPinCoords = event.latlng;
+    donationPinLabel = 'Pinned location';
+    cancelDonationPinMode({ reopenModal: false });
+
+    if (donationTempMarker && map) {
+        map.removeLayer(donationTempMarker);
+    }
+
+    donationTempMarker = L.marker([event.latlng.lat, event.latlng.lng], {
+        icon: L.divIcon({
+            className: 'temp-report-marker',
+            html: '<i class="fas fa-map-marker-alt" style="color: #1f8f4a; font-size: 20px; animation: bounce 1s infinite;"></i>',
+            iconSize: [25, 25],
+            iconAnchor: [12, 25]
+        })
+    }).addTo(map);
+
+    const targetZoom = Math.max(map.getZoom(), 17);
+    map.flyTo([event.latlng.lat, event.latlng.lng], targetZoom, { duration: 0.6 });
+
+    setDonationPinPreview(donationPinLabel, event.latlng);
+    openDonationLogModal();
+
+    fetchConfirmLocationName(event.latlng)
+        .then((name) => {
+            donationPinLabel = name || 'Pinned location';
+            setDonationPinPreview(donationPinLabel, event.latlng);
+        })
+        .catch(() => {
+            donationPinLabel = 'Pinned location';
+            setDonationPinPreview(donationPinLabel, event.latlng);
+        });
+}
+
+function cancelDonationPinMode(options = {}) {
+    const { reopenModal = true } = options;
+    donationPinModeActive = false;
+    document.body.classList.remove('reporting-mode');
+    document.body.classList.remove('pinning-focus');
+    document.body.style.cursor = 'default';
+
+    const instruction = document.getElementById('donationPinInstruction');
+    if (instruction) {
+        instruction.remove();
+    }
+
+    if (map) {
+        map.off('click', handleDonationPinClick);
+    }
+    document.removeEventListener('keydown', handleDonationPinKeydown);
+
+    if (reopenModal) {
+        openDonationLogModal();
+    }
+}
+
+function handleDonationPinKeydown(event) {
+    if (event.key === 'Escape' && donationPinModeActive) {
+        event.preventDefault();
+        cancelDonationPinMode();
+    }
+}
+
+function bindDonationModalControls() {
+    const donationLogForm = document.getElementById('donationLogForm');
+    const closeBtn = document.getElementById('closeDonationLogModal');
+    const cancelBtn = document.getElementById('cancelDonationLog');
+    const addItemBtn = document.getElementById('addDonationItem');
+    const donationItems = document.getElementById('donationItems');
+    const donationLocationSelect = document.getElementById('donationLocationSelect');
+    const pinButton = document.getElementById('donationPinLocationBtn');
+    const donorTypeInputs = document.querySelectorAll('input[name="donorType"]');
+    const donationLocationModeInputs = document.querySelectorAll('input[name="donationLocationMode"]');
+
+    if (donationLogForm) {
+        donationLogForm.addEventListener('keydown', (event) => {
+            if (event.key !== 'Enter') {
+                return;
+            }
+
+            const target = event.target;
+            const tagName = target && target.tagName ? target.tagName.toLowerCase() : '';
+            const type = target && target.type ? target.type.toLowerCase() : '';
+
+            if (tagName === 'textarea' || type === 'submit' || type === 'button') {
+                return;
+            }
+
+            event.preventDefault();
+        });
+    }
+    if (closeBtn) {
+        closeBtn.addEventListener('click', closeDonationLogModal);
+    }
+    if (cancelBtn) {
+        cancelBtn.addEventListener('click', closeDonationLogModal);
+    }
+    if (addItemBtn) {
+        addItemBtn.addEventListener('click', () => {
+            if (!donationItems) {
+                return;
+            }
+            const row = document.createElement('div');
+            row.className = 'donation-item-row';
+            row.innerHTML = `
+                <input type="text" placeholder="Item name" required>
+                <input type="number" placeholder="Qty" min="0" required>
+                <input type="text" placeholder="Unit (packs, boxes)" required>
+                <button type="button" class="btn btn-danger btn-sm donation-remove-item" aria-label="Remove item">
+                    <i class="fas fa-trash"></i>
+                </button>
+            `;
+            donationItems.appendChild(row);
+        });
+    }
+    if (donationItems) {
+        donationItems.addEventListener('click', (event) => {
+            const removeBtn = event.target.closest('.donation-remove-item');
+            if (!removeBtn) {
+                return;
+            }
+            const row = removeBtn.closest('.donation-item-row');
+            if (!row) {
+                return;
+            }
+            row.remove();
+        });
+    }
+    if (donationLocationSelect) {
+        donationLocationSelect.addEventListener('change', () => {
+            const locationMode = document.querySelector('input[name="donationLocationMode"]:checked');
+            if (!locationMode || locationMode.value !== 'unreached') {
+                return;
+            }
+            const selectedOption = donationLocationSelect.selectedOptions[0];
+            if (!selectedOption || !selectedOption.value) {
+                clearDonationPinSelection();
+                return;
+            }
+            const coordsData = selectedOption.dataset.coords || '';
+            const coordsParts = coordsData.split(',').map(value => parseFloat(value.trim()));
+            if (coordsParts.length !== 2 || !Number.isFinite(coordsParts[0]) || !Number.isFinite(coordsParts[1])) {
+                systemAlert('Unable to load the selected location. Please choose another option.');
+                clearDonationPinSelection();
+                return;
+            }
+
+            const coords = { lat: coordsParts[0], lng: coordsParts[1] };
+            pendingDonationSelection = {
+                id: selectedOption.value,
+                label: selectedOption.textContent || 'Selected location',
+                coords
+            };
+
+            if (donationTempMarker && map) {
+                map.removeLayer(donationTempMarker);
+                donationTempMarker = null;
+            }
+
+            closeDonationLogModal({ preserveForm: true });
+            document.body.classList.add('pinning-focus');
+            if (map) {
+                const targetZoom = Math.max(map.getZoom(), 17);
+                map.flyTo([coords.lat, coords.lng], targetZoom, { duration: 0.6 });
+            }
+            openConfirmLocationModal(coords, {
+                context: 'donation',
+                onConfirm: confirmDonationLocationSelection,
+                onCancel: cancelDonationLocationSelection,
+                label: pendingDonationSelection.label
+            });
+        });
+    }
+    if (pinButton) {
+        pinButton.addEventListener('click', () => {
+            if (donationLocationSelect) {
+                donationLocationSelect.value = '';
+            }
+            clearDonationPinSelection();
+            closeDonationLogModal({ preserveForm: true });
+            startDonationPinMode();
+        });
+    }
+    if (donorTypeInputs.length) {
+        donorTypeInputs.forEach((input) => {
+            input.addEventListener('change', updateDonationDonorFields);
+        });
+    }
+    if (donationLocationModeInputs.length) {
+        donationLocationModeInputs.forEach((input) => {
+            input.addEventListener('change', updateDonationLocationModeFields);
+        });
+    }
+    setupDonationCashAmountInput();
+    updateDonationDonorFields();
+    updateDonationLocationModeFields();
+}
+
+async function submitDonationLog(event) {
+    event.preventDefault();
+
+    if (event.target && !event.target.checkValidity()) {
+        event.target.reportValidity();
+        return;
+    }
+
+    const donationLocationSelect = document.getElementById('donationLocationSelect');
+    const selectedOption = donationLocationSelect ? donationLocationSelect.selectedOptions[0] : null;
+    const selectedLocationId = selectedOption && selectedOption.value ? selectedOption.value : null;
+    const locationModeInput = document.querySelector('input[name="donationLocationMode"]:checked');
+    const locationMode = locationModeInput ? locationModeInput.value : '';
+
+    if (!locationMode) {
+        systemAlert('Please choose how you want to set the drop-off location.');
+        return;
+    }
+
+    if (locationMode === 'unreached') {
+        if (!selectedLocationId) {
+            systemAlert('Please select a supported location from the list.');
+            return;
+        }
+        if (selectedLocationId !== donationConfirmedLocationId) {
+            systemAlert('Please confirm the drop-off location on the map.');
+            return;
+        }
+    }
+
+    if (locationMode === 'pin' && !donationPinCoords) {
+        systemAlert('Please pin a drop-off point on the map.');
+        return;
+    }
+
+    if (donationUploadedImages.length < 2) {
+        systemAlert('Please upload at least 2 photos for verification.');
+        return;
+    }
+
+    const donationItems = [];
+    const itemRows = document.querySelectorAll('#donationItems .donation-item-row');
+    itemRows.forEach((row) => {
+        const inputs = row.querySelectorAll('input');
+        if (inputs.length < 3) {
+            return;
+        }
+        const name = inputs[0].value.trim();
+        const quantityValue = parseFloat(inputs[1].value);
+        const quantity = Number.isFinite(quantityValue) ? quantityValue : 0;
+        const unit = inputs[2].value.trim();
+
+        if (name || unit || inputs[1].value) {
+            donationItems.push({ name, quantity, unit });
+        }
+    });
+
+    const cashAmountInput = document.getElementById('donationCashAmount');
+    const cashAmountValue = cashAmountInput
+        ? parseFloat(normalizeCashAmountValue(cashAmountInput.value))
+        : null;
+    const cashAmount = Number.isFinite(cashAmountValue) && cashAmountValue > 0 ? cashAmountValue : null;
+
+    if (!donationItems.length && cashAmount === null) {
+        systemAlert('Please add at least one donation item or a cash amount.');
+        return;
+    }
+
+    const notesInput = document.getElementById('donationNotes');
+    const donationNotes = notesInput ? notesInput.value.trim() : '';
+
+    const donorType = getDonationDonorType();
+    const donorName = getDonationDonorName() || getDonorDisplayName() || 'Anonymous';
+    const donorEmail = window.firebaseAuth && window.firebaseAuth.currentUser
+        ? window.firebaseAuth.currentUser.email
+        : null;
+    const donorId = window.firebaseAuth && window.firebaseAuth.currentUser
+        ? window.firebaseAuth.currentUser.uid
+        : (window.getCurrentUserId ? window.getCurrentUserId() : null);
+
+    if (donorName) {
+        if (donorType === 'organization') {
+            localStorage.setItem(DONOR_TEAM_NAME_KEY, donorName);
+        } else {
+            localStorage.setItem(DONOR_DISPLAY_NAME_KEY, donorName);
+        }
+    }
+
+    let locationCoords = null;
+    let locationType = locationMode;
+    let locationName = '';
+    let locationId = null;
+
+    if (locationMode === 'unreached') {
+        locationType = 'supported';
+        locationId = selectedLocationId;
+        locationName = selectedOption ? selectedOption.textContent : 'Selected location';
+        if (selectedOption && selectedOption.dataset.coords) {
+            const coordsParts = selectedOption.dataset.coords.split(',').map(value => parseFloat(value.trim()));
+            if (coordsParts.length === 2 && Number.isFinite(coordsParts[0]) && Number.isFinite(coordsParts[1])) {
+                locationCoords = coordsParts;
+            }
+        }
+    } else {
+        locationType = 'pinned';
+        locationName = donationPinLabel || 'Pinned location';
+        locationCoords = donationPinCoords ? [donationPinCoords.lat, donationPinCoords.lng] : null;
+    }
+
+    const donationLog = {
+        id: `donation_${Date.now()}`,
+        donorId,
+        donorName,
+        donorType,
+        donorEmail,
+        submittedAt: new Date().toISOString(),
+        location: {
+            type: locationType,
+            id: locationId,
+            name: locationName,
+            coords: locationCoords
+        },
+        items: donationItems,
+        cashAmount,
+        notes: donationNotes,
+        images: donationUploadedImages.map(img => ({
+            id: img.id,
+            name: img.name,
+            data: img.data,
+            size: img.size,
+            uploadedAt: new Date().toISOString()
+        })),
+        verificationStatus: 'pending',
+        verifiedAt: null,
+        verifiedBy: null
+    };
+
+    const submitButton = event.target.querySelector('button[type="submit"]');
+    if (submitButton) {
+        submitButton.disabled = true;
+        submitButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Submitting...';
+    }
+
+    try {
+        if (!db || !window.firebaseApp) {
+            systemAlert('Donation log submission requires an online connection.');
+            return;
+        }
+
+        await saveDonationLogToFirestore(donationLog);
+        addGuestActivity({
+            type: 'donation',
+            locationId,
+            locationName,
+            donorName,
+            donorType,
+            itemCount: donationItems.length,
+            cashAmount
+        });
+        showSuccessMessage('Donation log submitted for verification.');
+        closeDonationLogModal();
+    } catch (error) {
+        console.error('Error submitting donation log:', error);
+        systemAlert('Failed to submit donation log. Please try again.');
+    } finally {
+        if (submitButton) {
+            submitButton.disabled = false;
+            submitButton.innerHTML = 'Submit donation log';
+        }
+    }
 }
 
 async function submitLocationReport(e) {
@@ -3000,6 +4928,12 @@ async function submitLocationReport(e) {
         return;
     }
 
+    // Check if at least one photo is uploaded
+    if (uploadedImages.length === 0) {
+        systemAlert('Please attach at least one photo to help verify the location.');
+        return;
+    }
+
     // Disable submit button to prevent double submission
     const submitButton = document.querySelector('#reportForm button[type="submit"]');
     if (submitButton) {
@@ -3011,10 +4945,13 @@ async function submitLocationReport(e) {
         // Get user ID for ownership tracking
         let userId = null;
         let sessionId = localStorage.getItem('anonymousSessionId');
+        const guestId = getStoredGuestId() || localStorage.getItem('guestSessionId');
 
         if (window.firebaseAuth && window.firebaseAuth.currentUser) {
             // Authenticated user
             userId = window.firebaseAuth.currentUser.uid;
+        } else if (guestId) {
+            userId = guestId;
         } else if (window.getCurrentUserId) {
             userId = window.getCurrentUserId();
         } else {
@@ -3027,7 +4964,7 @@ async function submitLocationReport(e) {
         }
 
         // Get form elements with null checks
-        const locationNameEl = document.getElementById('locationName');
+        const landmarkEl = document.getElementById('landmark');
         const locationSourceEl = document.getElementById('locationSource');
         const urgencyLevelEl = document.getElementById('urgencyLevel');
         const peopleCountEl = document.getElementById('peopleCount');
@@ -3036,8 +4973,14 @@ async function submitLocationReport(e) {
         const reporterContactEl = document.getElementById('reporterContact');
 
         // Validate required fields exist
-        if (!locationNameEl || !locationSourceEl || !urgencyLevelEl) {
+        if (!landmarkEl || !locationSourceEl || !urgencyLevelEl) {
             systemAlert('Form error: Required fields not found. Please refresh the page and try again.');
+            return;
+        }
+
+        // Validate landmark is filled
+        if (!landmarkEl.value.trim()) {
+            systemAlert('Please provide landmark details to help locate this place.');
             return;
         }
 
@@ -3057,20 +5000,32 @@ async function submitLocationReport(e) {
             : null;
         const normalizedPeopleCount = Number.isFinite(peopleCountValue) ? peopleCountValue : null;
 
+        const reporterInputValue = reporterNameEl ? reporterNameEl.value.trim() : '';
+        const actualReporter = (window.firebaseAuth && window.firebaseAuth.currentUser &&
+            (window.firebaseAuth.currentUser.displayName || window.firebaseAuth.currentUser.email)) ||
+            (guestId || 'Anonymous');
+
+        // The input field is for contact person, not the reporter
+        const contactPersonName = reporterInputValue || actualReporter;
+
         // Create user report object
         const userReport = {
             id: 'user_' + Date.now(),
             userId: userId, // Track who created this pin (authenticated or session ID)
             createdBy: userId,
             isAnonymous: !window.firebaseAuth || !window.firebaseAuth.currentUser,
-            name: locationNameEl.value || '',
+            name: confirmedLocationName || 'Unnamed location', // Changed from locationName to name for Firestore compatibility
+            locationName: confirmedLocationName || 'Unnamed location', // Keep for backward compatibility
+            landmark: landmarkEl.value.trim(),
             coords: [pendingReportCoords.lat, pendingReportCoords.lng],
             source: locationSourceEl.value || '',
             reliefNeeds: reliefNeeds,
-            urgencyLevel: urgencyLevelEl.value || '',
+            urgency: urgencyLevelEl.value || '',
+            urgencyLevel: urgencyLevelEl.value || '', // Added for Firestore compatibility
             peopleCount: normalizedPeopleCount,
             additionalInfo: additionalInfoEl ? additionalInfoEl.value || '' : '',
-            reporterName: reporterNameEl ? reporterNameEl.value || '' : '',
+            reporterName: actualReporter, // Actual reporter from user ID/guest ID
+            contactPerson: contactPersonName, // Contact person from input field
             reporterContact: reporterContactEl ? reporterContactEl.value || '' : '',
             reportedAt: new Date().toISOString(),
             status: 'user_reported',
@@ -3141,6 +5096,15 @@ async function submitLocationReport(e) {
         // Update pinned locations list
         updatePinnedLocationsList();
 
+        addGuestActivity({
+            type: 'report',
+            locationId: userReport.firestoreId || userReport.id,
+            locationName: userReport.locationName,
+            urgency: userReport.urgency,
+            reliefNeeds: userReport.reliefNeeds,
+            peopleCount: userReport.peopleCount
+        });
+
         // Remove temporary marker
         if (window.tempReportMarker) {
             map.removeLayer(window.tempReportMarker);
@@ -3175,7 +5139,7 @@ async function submitLocationReport(e) {
 function addUserReportedMarker(report) {
     // Check if marker should be displayed based on current filter
     const matchesUrgency = currentUrgencyFilter === 'all' ||
-        report.urgencyLevel === currentUrgencyFilter;
+        report.urgency === currentUrgencyFilter;
 
     const isReached = report.reached === true;
     const matchesReached = isReachedViewActive ? isReached : !isReached;
@@ -3194,9 +5158,47 @@ function getUrgencyColor(urgencyLevel) {
     }
 }
 
+function getResponseStatusData(report) {
+    const isReached = report.reached === true;
+    const respondingName = [
+        report.donorResponding,
+        report.respondingTeam,
+        report.responseTeam,
+        report.reachedByTeam,
+        report.supportedByName,
+        report.supporterName
+    ]
+        .map(value => (value || '').toString().trim())
+        .find(value => value) || '';
+    const responseStatusValue = (report.responseStatus || report.reliefStatus || '').toString().toLowerCase();
+    const supportStatusValue = (report.supportStatus || report.support_status || '').toString().toLowerCase();
+    const isOnTheWay = !isReached && (
+        report.onTheWay === true ||
+        report.on_the_way === true ||
+        supportStatusValue.includes('on the way') ||
+        supportStatusValue.includes('on_the_way') ||
+        supportStatusValue.includes('on-the-way') ||
+        responseStatusValue.includes('on the way') ||
+        responseStatusValue.includes('on_the_way') ||
+        responseStatusValue.includes('on-the-way') ||
+        responseStatusValue.includes('ontheway') ||
+        responseStatusValue.includes('enroute') ||
+        responseStatusValue.includes('en route') ||
+        Boolean(respondingName)
+    );
+
+    return {
+        isReached,
+        isOnTheWay,
+        respondingName,
+        responseStatusValue
+    };
+}
+
 function createUserReportPopup(report) {
-    const urgencyBadge = `<span class="status-badge" style="background-color: ${getUrgencyColor(report.urgencyLevel)}; color: white;">${report.urgencyLevel.toUpperCase()}</span>`;
-    const sourceBadge = `<span class="relief-badge relief-needs-help">${report.source.toUpperCase()}</span>`;
+    const urgencyValue = report.urgency || report.urgencyLevel || 'moderate';
+    const urgencyBadge = `<span class="status-badge" style="background-color: ${getUrgencyColor(urgencyValue)}; color: white;">${urgencyValue.toUpperCase()}</span>`;
+    const sourceBadge = `<span class="relief-badge relief-needs-help">${(report.source || 'unknown').toUpperCase()}</span>`;
 
     // Use a unique identifier that works for both local and Firestore items
     const uniqueId = report.firestoreId || report.id || `temp_${Date.now()}`;
@@ -3205,15 +5207,31 @@ function createUserReportPopup(report) {
     let canDelete = false;
     let deleteReason = '';
 
-    // Get current user ID (authenticated or session)
-    let currentUserId = null;
+    const ownershipCandidates = new Set();
     if (window.firebaseAuth && window.firebaseAuth.currentUser) {
-        currentUserId = window.firebaseAuth.currentUser.uid;
-    } else if (window.getCurrentUserId) {
-        currentUserId = window.getCurrentUserId();
-    } else {
-        // Check anonymous session ID
-        currentUserId = localStorage.getItem('anonymousSessionId');
+        ownershipCandidates.add(window.firebaseAuth.currentUser.uid);
+    }
+
+    if (window.getCurrentUserId) {
+        const currentId = window.getCurrentUserId();
+        if (currentId) {
+            ownershipCandidates.add(currentId);
+        }
+    }
+
+    const localFallbackId = localStorage.getItem('localUserId');
+    if (localFallbackId) {
+        ownershipCandidates.add(localFallbackId);
+    }
+
+    const sessionFallbackId = localStorage.getItem('anonymousSessionId');
+    if (sessionFallbackId) {
+        ownershipCandidates.add(sessionFallbackId);
+    }
+
+    const guestFallbackId = getStoredGuestId() || localStorage.getItem('guestSessionId');
+    if (guestFallbackId) {
+        ownershipCandidates.add(guestFallbackId);
     }
 
     const masterAdminEmails = ['louisejane1007@gmail.com'];
@@ -3225,7 +5243,12 @@ function createUserReportPopup(report) {
     const isMasterAdmin = window.isAdminMap && masterAdminEmails.includes(adminEmail);
 
     // Users can delete their own pins; master admin can delete all pins on admin map
-    if (isMasterAdmin || (currentUserId && report.userId && report.userId === currentUserId)) {
+    const isOwner = Boolean(
+        (report.userId && ownershipCandidates.has(report.userId)) ||
+        (report.createdBy && ownershipCandidates.has(report.createdBy))
+    );
+
+    if (isMasterAdmin || isOwner) {
         canDelete = true;
         deleteReason = isMasterAdmin ? 'Master admin' : 'Your pin';
     }
@@ -3235,7 +5258,13 @@ function createUserReportPopup(report) {
         ? 'Only master admins can remove this'
         : 'Only the creator can remove this';
 
-    const actionButton = canDelete ?
+    const { isReached, isOnTheWay, respondingName } = getResponseStatusData(report);
+    const safeRespondingName = respondingName ? escapeHtml(respondingName) : '';
+    const safeReachedTeam = report.reachedByTeam ? escapeHtml(report.reachedByTeam) : '';
+    const donorIsResponding = isLocationSupportedByCurrentUser(report, { respondingName, isReached, isOnTheWay });
+    const isDonorMap = window.isDonorMap === true;
+
+    let actionButton = canDelete ?
         `<button onclick="removeUserReportedLocation('${uniqueId}')" class="btn btn-danger btn-sm" title="Remove this location">
             <i class="fas fa-trash"></i> Remove
         </button>` :
@@ -3243,28 +5272,33 @@ function createUserReportPopup(report) {
             <i class="fas fa-lock"></i> ${noDeleteMessage}
         </span>`;
 
-    // Check response status
-    const isReached = report.reached || false;
-    const respondingName = [
-        report.donorResponding,
-        report.respondingTeam,
-        report.responseTeam,
-        report.reachedByTeam
-    ]
-        .map(value => (value || '').toString().trim())
-        .find(value => value);
-    const responseStatusValue = (report.responseStatus || report.reliefStatus || '').toString().toLowerCase();
-    const isOnTheWay = !isReached && (
-        report.onTheWay === true ||
-        report.on_the_way === true ||
-        responseStatusValue.includes('on the way') ||
-        responseStatusValue.includes('on_the_way') ||
-        responseStatusValue.includes('on-the-way') ||
-        responseStatusValue.includes('ontheway') ||
-        responseStatusValue.includes('enroute') ||
-        responseStatusValue.includes('en route') ||
-        Boolean(respondingName)
-    );
+    if (isDonorMap) {
+        if (isReached) {
+            const reachedMessage = safeReachedTeam
+                ? `Reached by ${safeReachedTeam}`
+                : 'Reached by another team';
+            actionButton = `
+                <span class="text-muted" style="font-size: 0.85rem; padding: 0.5rem; display: inline-flex; align-items: center; gap: 0.4rem;">
+                    <i class="fas fa-flag-checkered"></i> ${reachedMessage}
+                </span>
+            `;
+        } else if (isOnTheWay) {
+            const supportMessage = donorIsResponding
+                ? 'You are supporting this location'
+                : `Currently supported by ${safeRespondingName || 'another team'}`;
+            actionButton = `
+                <span class="text-muted" style="font-size: 0.85rem; padding: 0.5rem; display: inline-flex; align-items: center; gap: 0.4rem;">
+                    <i class="fas fa-route"></i> ${supportMessage}
+                </span>
+            `;
+        } else {
+            actionButton = `
+                <button onclick="supportLocationForDonor('${uniqueId}')" class="btn btn-success btn-sm" title="Support this location">
+                    <i class="fas fa-hand-holding-heart"></i> Support this location
+                </button>
+            `;
+        }
+    }
     const responseStatusBadge = (() => {
         if (isReached) {
             return `
@@ -3272,21 +5306,22 @@ function createUserReportPopup(report) {
             <p style="margin: 0; color: #155724; font-weight: 600;">
                 <i class="fas fa-check-circle"></i> Response Status: Reached
             </p>
-            ${report.reachedByTeam ? `<p style="margin: 0.25rem 0 0 0; color: #155724; font-size: 0.9rem;">
-                <strong>Team Responding:</strong> ${report.reachedByTeam}
+            ${safeReachedTeam ? `<p style="margin: 0.25rem 0 0 0; color: #155724; font-size: 0.9rem;">
+                <strong>Team Responding:</strong> ${safeReachedTeam}
             </p>` : ''}
         </div>
     `;
         }
 
         const statusLabel = isOnTheWay ? 'On the way' : 'Unreached';
+        const supporterLabel = isOnTheWay ? 'Supported by' : 'Donor Responding';
         const statusStyles = isOnTheWay
             ? {
-                background: '#fff3cd',
-                border: '#ffc107',
-                text: '#856404',
+                background: '#dbeafe', // Light blue
+                border: '#1d4ed8',     // Darker blue
+                text: '#1e3a8a',       // Even darker blue
                 icon: 'fa-route',
-                donor: respondingName || 'Unassigned'
+                donor: safeRespondingName || 'Unassigned'
             }
             : {
                 background: '#f8f9fa',
@@ -3296,14 +5331,36 @@ function createUserReportPopup(report) {
                 donor: 'None yet'
             };
 
+        // Get supporter type and contact for on-the-way locations
+        let supporterTypeInfo = '';
+        let contactInfo = '';
+        if (isOnTheWay && report) {
+            const supporterType = report.supporterType || 'individual';
+            const supporterContact = report.supporterContact || '';
+            const supporterAnonymous = report.supporterAnonymous === true;
+
+            supporterTypeInfo = supporterAnonymous
+                ? ''
+                : supporterType === 'team'
+                    ? `<span style="color: #1e3a8a; font-size: 0.8rem; margin-left: 0.25rem;">(Team)</span>`
+                    : `<span style="color: #1e3a8a; font-size: 0.8rem; margin-left: 0.25rem;">(Individual)</span>`;
+
+            if (supporterContact && !supporterAnonymous) {
+                contactInfo = `<p style="margin: 0.25rem 0 0 0; color: #1e3a8a; font-size: 0.8rem;">
+                    <strong>Contact:</strong> ${escapeHtml(supporterContact)}
+                </p>`;
+            }
+        }
+
         return `
         <div style="background: ${statusStyles.background}; border-left: 4px solid ${statusStyles.border}; padding: 0.75rem; margin: 0.5rem 0; border-radius: 4px;">
             <p style="margin: 0; color: ${statusStyles.text}; font-weight: 600;">
                 <i class="fas ${statusStyles.icon}"></i> Response Status: ${statusLabel}
             </p>
             <p style="margin: 0.25rem 0 0 0; color: ${statusStyles.text}; font-size: 0.9rem;">
-                <strong>Donor Responding:</strong> ${statusStyles.donor}
+                <strong>${supporterLabel}:</strong> ${statusStyles.donor}${supporterTypeInfo}
             </p>
+            ${contactInfo}
         </div>
     `;
     })();
@@ -3317,13 +5374,13 @@ function createUserReportPopup(report) {
         <div class="popup-content compact-popup">
             <!-- Compact header with navigation in one line -->
             <div class="popup-header">
-                <h4><i class="fas fa-map-marker-alt"></i> ${report.name}</h4>
+                <h4><i class="fas fa-map-marker-alt"></i> ${report.locationName || report.name || 'Unnamed location'}</h4>
                 <div class="nav-buttons-inline">
-                    <button onclick="openWazeNavigation(${report.coords[0]}, ${report.coords[1]}, '${report.name.replace(/'/g, "\\'")}');" 
+                    <button onclick="openWazeNavigation(${report.coords[0]}, ${report.coords[1]}, '${(report.locationName || report.name || 'Location').replace(/'/g, "\\'")}');" 
                             class="nav-circle-btn-small waze-circle" title="Waze">
                         <i class="fas fa-route"></i>
                     </button>
-                    <button onclick="openGoogleMapsNavigation(${report.coords[0]}, ${report.coords[1]}, '${report.name.replace(/'/g, "\\'")}');" 
+                    <button onclick="openGoogleMapsNavigation(${report.coords[0]}, ${report.coords[1]}, '${(report.locationName || report.name || 'Location').replace(/'/g, "\\'")}');" 
                             class="nav-circle-btn-small gmaps-circle" title="Maps">
                         <i class="fas fa-map-marked-alt"></i>
                     </button>
@@ -3341,7 +5398,7 @@ function createUserReportPopup(report) {
             : ''}
                 ${report.additionalInfo ? `<p class="popup-details">${createCollapsibleText(report.additionalInfo, 150, uniqueId)}</p>` : ''}
                 <p class="popup-meta">${new Date(report.reportedAt).toLocaleDateString()} • ${report.coords[0].toFixed(4)}, ${report.coords[1].toFixed(4)}</p>
-                ${report.reporterName ? `<p class="popup-reporter">By: ${report.reporterName}</p>` : ''}
+                ${report.userId || report.createdBy ? `<p class="popup-reporter">By: ${report.userId || report.createdBy}</p>` : ''}
                 
                 ${(() => {
             return createImageGallery(report.images, uniqueId, report);
@@ -3387,7 +5444,7 @@ function createUserReportPopup(report) {
                 </div>
             </div>
             
-            ${!canDelete ? `
+            ${!canDelete && !isDonorMap ? `
             <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid #eee; font-size: 11px; color: #888; text-align: center; font-style: italic;">
                 ${noDeleteMessage}
             </div>
@@ -3510,6 +5567,160 @@ async function removeUserReportedLocation(identifier) {
 
     // Update pinned locations list
     updatePinnedLocationsList();
+}
+
+async function supportLocationForDonor(identifier) {
+    if (!identifier) {
+        systemAlert('Unable to support this location right now.');
+        return false;
+    }
+
+    let reportIndex = userReportedLocations.findIndex(report => report.firestoreId === identifier);
+    if (reportIndex === -1) {
+        reportIndex = userReportedLocations.findIndex(report => report.id === identifier);
+    }
+
+    if (reportIndex === -1) {
+        reportIndex = userReportedLocations.findIndex(report => report.firestoreId === identifier || report.id === identifier);
+    }
+
+    if (reportIndex === -1) {
+        systemAlert('Location not found. It may have been updated by another user.');
+        return false;
+    }
+
+    const report = userReportedLocations[reportIndex];
+    const { isReached, isOnTheWay } = getResponseStatusData(report);
+
+    if (isReached) {
+        systemAlert('This location is already marked as reached.');
+        return false;
+    }
+
+    if (isOnTheWay) {
+        systemAlert('This location is already being supported.');
+        return false;
+    }
+
+    const defaultIndividualName = localStorage.getItem(DONOR_DISPLAY_NAME_KEY) || getDonorDisplayName();
+    const defaultTeamName = localStorage.getItem(DONOR_TEAM_NAME_KEY) || '';
+    let supporterId = getCurrentSupporterId();
+    if (!supporterId) {
+        supporterId = ensureGuestSession();
+    }
+    const supporterInfo = await promptForDonorSupporterName({
+        individualName: defaultIndividualName,
+        teamName: defaultTeamName
+    });
+    if (!supporterInfo) {
+        return false;
+    }
+
+    const supporterType = supporterInfo.type || 'individual';
+    const supporterAnonymous = Boolean(supporterInfo.isAnonymous);
+    const supporterFirstName = supporterInfo.firstName || '';
+    const supporterLastName = supporterInfo.lastName || '';
+    const supporterTeamName = supporterInfo.teamName || '';
+    const supporterContact = supporterAnonymous ? '' : (supporterInfo.contact || '');
+    const supporterName = supporterInfo.displayName ||
+        (supporterType === 'team'
+            ? supporterTeamName
+            : `${supporterFirstName} ${supporterLastName}`.trim()) ||
+        'Anonymous';
+
+    if (!supporterAnonymous) {
+        if (supporterType === 'team' && supporterTeamName) {
+            localStorage.setItem(DONOR_TEAM_NAME_KEY, supporterTeamName);
+        } else if (supporterFirstName || supporterLastName) {
+            localStorage.setItem(DONOR_DISPLAY_NAME_KEY, `${supporterFirstName} ${supporterLastName}`.trim());
+        }
+    }
+    const supportedAt = new Date().toISOString();
+
+    const updatePayload = {
+        onTheWay: true,
+        responseStatus: 'on the way',
+        donorResponding: supporterName,
+        respondingTeam: supporterName,
+        responseTeam: supporterName,
+        respondingAt: supportedAt,
+        supportedBy: supporterId,
+        supportedByName: supporterName,
+        supportedAt,
+        supportStatus: 'on_the_way',
+        supporterType,
+        supporterContact,
+        supporterAnonymous,
+        supporterFirstName,
+        supporterLastName,
+        supporterTeamName
+    };
+
+    if (report.firestoreId && db) {
+        try {
+            const { doc, updateDoc } = await import('https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js');
+            await updateDoc(doc(db, 'relief-locations', report.firestoreId), updatePayload);
+        } catch (error) {
+            console.error('Error updating donor support status:', error);
+            systemAlert('Unable to update this location right now. Please try again.');
+            return false;
+        }
+    }
+
+    userReportedLocations[reportIndex] = {
+        ...report,
+        ...updatePayload
+    };
+
+    localStorage.setItem('userReportedLocations', JSON.stringify(userReportedLocations));
+
+    // Record the support action in guest activities for user dashboard tracking
+    addGuestActivity({
+        type: 'support',
+        locationId: report.firestoreId || report.id,
+        locationName: report.locationName || report.name,
+        supporterName,
+        supporterType,
+        supporterAnonymous
+    });
+
+    refreshMapMarkers();
+    updatePinnedLocationsList();
+    refreshDonationLocationOptions();
+    if (isSupportModeActive) {
+        cancelSupportMode();
+    }
+    const supporterTypeLabel = supporterType === 'team' ? 'Team' : 'Individual';
+    const supporterSuffix = supporterAnonymous ? '' : ` (${supporterTypeLabel})`;
+    showSuccessMessage(`✅ Support registered for ${supporterName}${supporterSuffix}.`);
+    return true;
+}
+
+function focusLocationOnMap(location) {
+    if (!map || !location || !Array.isArray(location.coords)) {
+        return;
+    }
+
+    const targetLatLng = L.latLng(location.coords[0], location.coords[1]);
+    const newLatLng = centerPopupOnScreen(targetLatLng, {
+        zoom: 15,
+        offsetMultiplier: 1.2
+    });
+
+    map.setView(newLatLng, 15, {
+        animate: true,
+        duration: 0.5,
+        easeLinearity: 0.25
+    });
+
+    setTimeout(() => {
+        markerLayers.userReported.eachLayer((layer) => {
+            if (layer.getLatLng().lat === location.coords[0] &&
+                layer.getLatLng().lng === location.coords[1]) {
+                layer.openPopup();
+            }
+        });
+    }, 300);
 }
 
 // Pinned locations dropdown functions
@@ -3645,6 +5856,249 @@ function updatePinnedLocationsList() {
     if (pinnedList && pinnedList.style.display === 'block') {
         initializePinnedLocationsList();
     }
+
+    updateDonorDashboardOverview();
+    refreshDonationLocationOptions();
+}
+
+function updateDonorDashboardOverview() {
+    if (!window.isDonorMap) {
+        return;
+    }
+
+    const mapStatusLabel = document.getElementById('mapStatusLabel');
+    const mapCountLabel = document.getElementById('mapCountLabel');
+    const unreachedList = document.getElementById('unreachedList');
+    const claimsList = document.getElementById('claimsList');
+    const unreachedSearch = document.getElementById('unreachedSearch');
+    const unreachedFilter = document.getElementById('unreachedFilter');
+    const claimsSearch = document.getElementById('claimsSearch');
+    const claimsFilter = document.getElementById('claimsFilter');
+
+    if (!mapStatusLabel && !mapCountLabel && !unreachedList && !claimsList) {
+        return;
+    }
+
+    const locations = Array.isArray(userReportedLocations) ? userReportedLocations : [];
+    const statusData = locations.map(location => ({
+        location,
+        ...getResponseStatusData(location)
+    }));
+
+    const reachedCount = statusData.filter(item => item.isReached).length;
+    const onTheWayCount = statusData.filter(item => item.isOnTheWay).length;
+    const unreachedCount = statusData.filter(item => !item.isReached && !item.isOnTheWay).length;
+    const totalCount = locations.length;
+
+    if (mapStatusLabel) {
+        if (!totalCount) {
+            mapStatusLabel.textContent = 'Map ready for unreached locations.';
+        } else {
+            mapStatusLabel.textContent = isReachedViewActive
+                ? `${reachedCount} reached locations on the map.`
+                : `${unreachedCount} unreached locations on the map.`;
+        }
+    }
+
+    if (mapCountLabel) {
+        if (!totalCount) {
+            mapCountLabel.textContent = '0 locations loaded';
+        } else {
+            const onTheWayText = onTheWayCount ? ` • ${onTheWayCount} on the way` : '';
+            mapCountLabel.textContent = `${totalCount} locations loaded${onTheWayText}`;
+        }
+    }
+
+    if (unreachedList) {
+        const query = unreachedSearch ? unreachedSearch.value.toLowerCase().trim() : '';
+        const urgencyFilter = unreachedFilter ? unreachedFilter.value : 'all';
+        const filteredUnreached = statusData
+            .filter(item => !item.isReached && !item.isOnTheWay)
+            .map(item => item.location)
+            .filter(location => matchesDonorSearch(location, query))
+            .filter(location => urgencyFilter === 'all' || location.urgency === urgencyFilter);
+
+        renderDonorLocationList(unreachedList, filteredUnreached, {
+            emptyMessage: 'Unreached locations will appear here once loaded.',
+            statusLabel: 'Unreached',
+            statusClass: 'status-unreached',
+            statusIcon: 'fa-clock',
+            showSupportAction: true
+        });
+    }
+
+    if (claimsList) {
+        const query = claimsSearch ? claimsSearch.value.toLowerCase().trim() : '';
+        const claimFilterValue = claimsFilter ? claimsFilter.value : 'all';
+        const claimEntries = statusData
+            .filter(item => (item.isOnTheWay || item.isReached))
+            .filter(item => isLocationSupportedByCurrentUser(item.location, item))
+            .map(item => ({
+                location: item.location,
+                claimStatus: item.isReached ? 'pending' : 'on-the-way',
+                respondingName: item.respondingName
+            }))
+            .filter(entry => claimFilterValue === 'all' || entry.claimStatus === claimFilterValue)
+            .filter(entry => matchesDonorSearch(entry.location, query, entry.respondingName));
+
+        renderDonorLocationList(claimsList, claimEntries.map(entry => ({
+            ...entry.location,
+            _claimStatus: entry.claimStatus
+        })), {
+            emptyMessage: 'No claimed locations yet. Claim a location from the map tab.',
+            statusLabel: 'On the way',
+            statusClass: 'status-claimed',
+            statusIcon: 'fa-route',
+            showSupportAction: false
+        });
+    }
+}
+
+function matchesDonorSearch(location, query, respondingName = '') {
+    if (!query) {
+        return true;
+    }
+
+    const normalizedQuery = query.toLowerCase();
+    const fields = [
+        location.name,
+        location.additionalInfo,
+        location.source,
+        location.reporterName,
+        respondingName
+    ];
+
+    const needs = Array.isArray(location.reliefNeeds) ? location.reliefNeeds : [];
+    return fields.some(field => field && field.toString().toLowerCase().includes(normalizedQuery)) ||
+        needs.some(need => need && need.toString().toLowerCase().includes(normalizedQuery));
+}
+
+function renderDonorLocationList(container, locations, options) {
+    if (!container) {
+        return;
+    }
+
+    const {
+        emptyMessage,
+        statusLabel,
+        statusClass,
+        statusIcon,
+        showSupportAction
+    } = options;
+
+    container.innerHTML = '';
+
+    if (!locations.length) {
+        const empty = document.createElement('p');
+        empty.textContent = emptyMessage;
+        container.appendChild(empty);
+        return;
+    }
+
+    locations.forEach(location => {
+        container.appendChild(buildDonorLocationCard(location, {
+            statusLabel,
+            statusClass,
+            statusIcon,
+            showSupportAction
+        }));
+    });
+}
+
+function buildDonorLocationCard(location, options) {
+    const {
+        statusLabel,
+        statusClass,
+        statusIcon,
+        showSupportAction
+    } = options;
+
+    const card = document.createElement('div');
+    card.className = 'location-card';
+
+    let cardStatusLabel = statusLabel;
+    let cardStatusClass = statusClass;
+    let cardStatusIcon = statusIcon;
+    if (location._claimStatus) {
+        if (location._claimStatus === 'pending') {
+            cardStatusLabel = 'Reached';
+            cardStatusClass = 'status-pending';
+            cardStatusIcon = 'fa-check-circle';
+        } else if (location._claimStatus === 'on-the-way') {
+            cardStatusLabel = 'On the way';
+            cardStatusClass = 'status-claimed';
+            cardStatusIcon = 'fa-route';
+        }
+    }
+
+    const locationName = escapeHtml((location.locationName || 'Unnamed location').toString());
+    const urgencyText = location.urgency
+        ? location.urgency.charAt(0).toUpperCase() + location.urgency.slice(1)
+        : 'Unknown';
+    const urgencyColor = getUrgencyColor(location.urgency || '');
+    const reportedDate = location.reportedAt ? new Date(location.reportedAt).toLocaleDateString() : '';
+    const needs = Array.isArray(location.reliefNeeds)
+        ? location.reliefNeeds.filter(Boolean).map(need => escapeHtml(String(need))).join(', ')
+        : '';
+    const notes = location.additionalInfo
+        ? escapeHtml(String(location.additionalInfo).slice(0, 120))
+        : '';
+    const { respondingName } = getResponseStatusData(location);
+    const safeRespondingName = respondingName ? escapeHtml(respondingName) : '';
+
+    // Get supporter type info for display
+    let supporterTypeDisplay = '';
+    if (location.supporterType && !location.supporterAnonymous) {
+        supporterTypeDisplay = location.supporterType === 'team'
+            ? ' <span style="color: #1e3a8a; font-size: 0.8rem;">(Team)</span>'
+            : ' <span style="color: #1e3a8a; font-size: 0.8rem;">(Individual)</span>';
+    }
+
+    const statusBadge = `
+        <span class="status-badge ${cardStatusClass}">
+            <i class="fas ${cardStatusIcon}"></i> ${cardStatusLabel}
+        </span>
+    `;
+    const urgencyBadge = `
+        <span class="status-badge" style="background: ${urgencyColor}; color: #fff;">
+            ${urgencyText}
+        </span>
+    `;
+
+    card.innerHTML = `
+        <h4>${locationName}</h4>
+        <div class="location-meta">
+            ${statusBadge}
+            ${urgencyBadge}
+            ${location.source ? `<span>${escapeHtml((location.source || 'unknown').toUpperCase())}</span>` : ''}
+            ${reportedDate ? `<span>${reportedDate}</span>` : ''}
+        </div>
+        ${needs ? `<div><strong>Needs:</strong> ${needs}</div>` : ''}
+        ${notes ? `<div>${notes}${location.additionalInfo && location.additionalInfo.length > 120 ? '…' : ''}</div>` : ''}
+        ${safeRespondingName ? `<div><strong>Responding:</strong> ${safeRespondingName}${supporterTypeDisplay}</div>` : ''}
+    `;
+
+    const actions = document.createElement('div');
+    actions.className = 'location-actions';
+
+    const viewBtn = document.createElement('button');
+    viewBtn.type = 'button';
+    viewBtn.className = 'donor-btn ghost';
+    viewBtn.innerHTML = '<i class="fas fa-map"></i> View on map';
+    viewBtn.addEventListener('click', () => focusLocationOnMap(location));
+    actions.appendChild(viewBtn);
+
+    if (showSupportAction) {
+        const supportBtn = document.createElement('button');
+        supportBtn.type = 'button';
+        supportBtn.className = 'donor-btn primary';
+        supportBtn.innerHTML = '<i class="fas fa-hand-holding-heart"></i> Support location';
+        supportBtn.addEventListener('click', () => supportLocationForDonor(location.firestoreId || location.id));
+        actions.appendChild(supportBtn);
+    }
+
+    card.appendChild(actions);
+    return card;
 }
 
 function initializePinnedLocationsList() {
@@ -3692,7 +6146,7 @@ function prepareFilteredLocations() {
             location.peopleCount !== null &&
             String(location.peopleCount).includes(currentSearchQuery);
         const matchesSearch = !currentSearchQuery ||
-            location.name.toLowerCase().includes(currentSearchQuery) ||
+            location.locationName?.toLowerCase().includes(currentSearchQuery) ||
             location.reliefNeeds.some(need => need.toLowerCase().includes(currentSearchQuery)) ||
             location.additionalInfo?.toLowerCase().includes(currentSearchQuery) ||
             peopleCountMatch ||
@@ -3700,7 +6154,7 @@ function prepareFilteredLocations() {
 
         // Urgency filter
         const matchesUrgency = currentUrgencyFilter === 'all' ||
-            location.urgencyLevel === currentUrgencyFilter;
+            location.urgency === currentUrgencyFilter;
 
         return matchesSearch && matchesUrgency;
     });
@@ -3708,8 +6162,8 @@ function prepareFilteredLocations() {
     // Sort filtered locations by urgency and date
     allFilteredLocations.sort((a, b) => {
         const urgencyOrder = { 'critical': 3, 'urgent': 2, 'moderate': 1 };
-        const urgencyA = urgencyOrder[a.urgencyLevel] || 0;
-        const urgencyB = urgencyOrder[b.urgencyLevel] || 0;
+        const urgencyA = urgencyOrder[a.urgency] || 0;
+        const urgencyB = urgencyOrder[b.urgency] || 0;
 
         if (urgencyA !== urgencyB) {
             return urgencyB - urgencyA; // Higher urgency first
@@ -3785,8 +6239,10 @@ function loadMorePinnedLocations() {
 }
 
 function createPinnedLocationItem(location, index) {
-    const urgencyColor = getUrgencyColor(location.urgencyLevel);
-    const urgencyText = location.urgencyLevel.charAt(0).toUpperCase() + location.urgencyLevel.slice(1);
+    const urgencyColor = getUrgencyColor(location.urgency);
+    const urgencyText = location.urgency
+        ? location.urgency.charAt(0).toUpperCase() + location.urgency.slice(1)
+        : 'Unknown';
 
     const listItem = document.createElement('div');
     listItem.className = 'pinned-item';
@@ -3829,7 +6285,7 @@ function createPinnedLocationItem(location, index) {
         <div class="pinned-item-name" style="font-size: 0.9rem; font-weight: 600; color: #2c3e50; margin-bottom: 0.3rem;">${displayName}</div>
         <div class="pinned-item-details">
             <span class="pinned-item-urgency" style="background-color: ${urgencyColor};">${urgencyText}</span>
-            <span class="pinned-item-source">${location.source.toUpperCase()}</span>
+            <span class="pinned-item-source">${(location.source || 'unknown').toUpperCase()}</span>
             <span style="color: #666; font-size: 0.8rem;">${new Date(location.reportedAt).toLocaleDateString()}</span>
         </div>
         <div class="pinned-item-needs">${location.reliefNeeds.join(', ')}</div>
@@ -3986,7 +6442,7 @@ function filterMapMarkers() {
             report.peopleCount !== null &&
             String(report.peopleCount).includes(currentSearchQuery);
         const matchesSearch = !currentSearchQuery ||
-            report.name.toLowerCase().includes(currentSearchQuery) ||
+            (report.locationName || report.name || '').toLowerCase().includes(currentSearchQuery) ||
             report.reliefNeeds.some(need => need.toLowerCase().includes(currentSearchQuery)) ||
             report.additionalInfo?.toLowerCase().includes(currentSearchQuery) ||
             peopleCountMatch ||
@@ -4218,7 +6674,7 @@ function filterPinsRealTime(query) {
     // Filter locations based on multiple criteria
     const matchingLocations = userReportedLocations.filter(report => {
         // Text-based matching (name, relief needs, additional info)
-        const nameMatch = report.name.toLowerCase().includes(queryLower);
+        const nameMatch = (report.locationName || report.name || '').toLowerCase().includes(queryLower);
         const reliefMatch = report.reliefNeeds.some(need =>
             need.toLowerCase().includes(queryLower)
         );
@@ -4478,7 +6934,7 @@ function createImageGallery(images, locationId, report) {
     const imageItems = actualImages && actualImages.length > 0 ? actualImages.map((image, index) => {
 
         return `
-        <div class="popup-image-item" onclick="openImageModal('${image.data}', '${image.name}', '${report.name}', '${report.urgencyLevel}', '${report.reliefNeeds.join(', ')}', '${new Date(report.reportedAt).toLocaleDateString()}')">
+        <div class="popup-image-item" onclick="openImageModal('${image.data}', '${image.name}', '${report.locationName || report.name || 'Location'}', '${report.urgencyLevel || report.urgency || ''}', '${report.reliefNeeds.join(', ')}', '${new Date(report.reportedAt).toLocaleDateString()}')">
             <img src="${image.data}" alt="${image.name}" title="Click to view full size">
         </div>
     `;
@@ -4498,11 +6954,11 @@ function createImageGallery(images, locationId, report) {
         <div class="popup-images" id="popupImages-${locationId}">
             <div class="photos-header" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
                 <h5 style="margin: 0;"><i class="fas fa-images"></i> ${headerText}</h5>
-                <button onclick="togglePhotos('${locationId}')" class="btn-toggle-photos" style="background: none; border: none; color: #666; cursor: pointer; padding: 5px; border-radius: 4px; transition: background-color 0.2s;" title="Show photos">
-                    <i class="fas fa-eye-slash" id="photoToggle-${locationId}"></i>
+                <button onclick="togglePhotos('${locationId}')" class="btn-toggle-photos" style="background: none; border: none; color: #666; cursor: pointer; padding: 5px; border-radius: 4px; transition: background-color 0.2s;" title="Hide photos">
+                    <i class="fas fa-eye" id="photoToggle-${locationId}"></i>
                 </button>
             </div>
-            <div class="popup-image-gallery" id="photoGallery-${locationId}" style="display: none;">
+            <div class="popup-image-gallery" id="photoGallery-${locationId}" style="display: block;">
                 ${imageItems}
             </div>
         </div>
@@ -4521,8 +6977,10 @@ function openImageModal(imageSrc, imageName, locationName, urgencyLevel, reliefN
         modalImage.alt = imageName;
 
         // Set location details
-        const urgencyText = urgencyLevel.charAt(0).toUpperCase() + urgencyLevel.slice(1);
-        const urgencyColor = getUrgencyColor(urgencyLevel);
+        const urgencyText = urgencyLevel
+            ? urgencyLevel.charAt(0).toUpperCase() + urgencyLevel.slice(1)
+            : 'Unknown';
+        const urgencyColor = getUrgencyColor(urgencyLevel || '');
 
         modalDetails.innerHTML = `
             <h4><i class="fa-solid fa-image"></i>${imageName}</h4>
@@ -4599,10 +7057,14 @@ function refreshMapMarkers() {
 // Helper function to add marker to map without checking filters
 function addUserReportedMarkerToMap(report) {
     // If location is reached, use green color; otherwise use urgency color
-    const isReached = report.reached || false;
-    const markerColor = isReached ? '#28a745' : getUrgencyColor(report.urgencyLevel);
-    const badgeText = isReached ? '✓' : 'U';
-    const badgeColor = isReached ? '#28a745' : '#17a2b8';
+    const statusData = getResponseStatusData(report);
+    const isReached = statusData.isReached;
+    const isOnTheWay = statusData.isOnTheWay;
+    const markerColor = isReached
+        ? '#28a745'
+        : (isOnTheWay ? '#1d4ed8' : getUrgencyColor(report.urgencyLevel));
+    const badgeText = isReached ? '✓' : (isOnTheWay ? 'O' : 'U');
+    const badgeColor = isReached ? '#28a745' : (isOnTheWay ? '#1d4ed8' : '#17a2b8');
 
     const icon = L.divIcon({
         className: 'user-reported-marker',
@@ -4633,6 +7095,13 @@ function addUserReportedMarkerToMap(report) {
             duration: 0.5,
             easeLinearity: 0.25
         });
+
+        if (isSupportModeActive) {
+            const identifier = report.firestoreId || report.id;
+            if (identifier && !statusData.isReached && !statusData.isOnTheWay) {
+                supportLocationForDonor(identifier);
+            }
+        }
     });
 
     markerLayers.userReported.addLayer(marker);
@@ -4750,6 +7219,14 @@ function shouldShowWelcomeGuide() {
 document.addEventListener('DOMContentLoaded', async () => {
     // Set initial status
     updateSyncStatus('connecting', 'Connecting...');
+
+    const storedGuestId = getStoredGuestId();
+    if (storedGuestId) {
+        if (!localStorage.getItem(GUEST_ACTIVITY_KEY)) {
+            localStorage.setItem(GUEST_ACTIVITY_KEY, JSON.stringify([]));
+        }
+        updateDashboardTitle(storedGuestId);
+    }
 
     // Wait a bit for Firebase to load
     setTimeout(async () => {
@@ -5080,13 +7557,19 @@ async function sendChatMessage(locationId) {
 
     if (!message) return;
 
-    const currentUser = getCurrentUserName();
-    const currentUserId = getCurrentUserId();
+    let currentUser = getCurrentUserName();
+    let currentUserId = getCurrentUserId();
 
-    // Only authenticated users can send messages
+    // Only authenticated users can send messages (guest fallback when enabled)
     if (!currentUser || !currentUserId) {
-        alert('Please sign in to send messages.');
-        return;
+        const guestId = getStoredGuestId();
+        if (guestId) {
+            currentUser = guestId;
+            currentUserId = guestId;
+        } else {
+            alert('Please sign in or start exploring as guest to send messages.');
+            return;
+        }
     }
 
     // Clear input immediately
@@ -5104,6 +7587,13 @@ async function sendChatMessage(locationId) {
     try {
         // Save to Firestore - real-time listener will display the message
         await saveChatMessage(messageData);
+
+        addGuestActivity({
+            type: 'chat',
+            locationId,
+            locationName: getLocationNameById(locationId),
+            message
+        });
 
     } catch (error) {
         console.error('Error sending message:', error);
