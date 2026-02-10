@@ -241,3 +241,103 @@ if (logoutBtn) {
         setAuthView(false);
     });
 }
+
+// Privacy Policy Modal Event Listeners
+const viewPrivacyPolicyBtn = document.getElementById('viewPrivacyPolicy');
+const privacyPolicyModal = document.getElementById('privacyPolicyModal');
+const closePrivacyModalBtn = document.getElementById('closePrivacyModal');
+const consentPrivacyBtn = document.getElementById('consentPrivacy');
+const disagreePrivacyBtn = document.getElementById('disagreePrivacy');
+const consentStatus = document.getElementById('consentStatus');
+
+// Privacy consent state
+let privacyConsented = false;
+
+// Open privacy policy modal
+if (viewPrivacyPolicyBtn) {
+    viewPrivacyPolicyBtn.addEventListener('click', () => {
+        if (privacyPolicyModal) {
+            privacyPolicyModal.style.display = 'flex';
+        }
+    });
+}
+
+// Close privacy policy modal
+if (closePrivacyModalBtn) {
+    closePrivacyModalBtn.addEventListener('click', () => {
+        if (privacyPolicyModal) {
+            privacyPolicyModal.style.display = 'none';
+        }
+    });
+}
+
+// Consent to privacy policy
+if (consentPrivacyBtn) {
+    consentPrivacyBtn.addEventListener('click', () => {
+        privacyConsented = true;
+        updateConsentStatus(true);
+        if (privacyPolicyModal) {
+            privacyPolicyModal.style.display = 'none';
+        }
+    });
+}
+
+// Disagree with privacy policy
+if (disagreePrivacyBtn) {
+    disagreePrivacyBtn.addEventListener('click', () => {
+        privacyConsented = false;
+        updateConsentStatus(false);
+        if (privacyPolicyModal) {
+            privacyPolicyModal.style.display = 'none';
+        }
+        // Close report modal if user disagrees
+        const reportModal = document.getElementById('reportModal');
+        if (reportModal) {
+            reportModal.style.display = 'none';
+        }
+    });
+}
+
+// Close modal when clicking outside
+if (privacyPolicyModal) {
+    privacyPolicyModal.addEventListener('click', (e) => {
+        if (e.target.id === 'privacyPolicyModal') {
+            privacyPolicyModal.style.display = 'none';
+        }
+    });
+}
+
+// Update consent status display
+function updateConsentStatus(consented) {
+    if (consentStatus) {
+        if (consented) {
+            consentStatus.classList.add('consented');
+            consentStatus.innerHTML = `
+                <i class="fas fa-check-circle"></i>
+                <span>Privacy consent given</span>
+            `;
+        } else {
+            consentStatus.classList.remove('consented');
+            consentStatus.innerHTML = `
+                <i class="fas fa-exclamation-circle"></i>
+                <span>Privacy consent required</span>
+            `;
+        }
+    }
+    
+    // Enable/disable submit button based on consent
+    const submitBtn = document.querySelector('#reportForm button[type="submit"]');
+    if (submitBtn) {
+        submitBtn.disabled = !consented;
+        if (consented) {
+            submitBtn.style.opacity = '1';
+            submitBtn.style.cursor = 'pointer';
+        } else {
+            submitBtn.style.opacity = '0.5';
+            submitBtn.style.cursor = 'not-allowed';
+        }
+    }
+}
+
+// Initialize consent status
+updateConsentStatus(false);

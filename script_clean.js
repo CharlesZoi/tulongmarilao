@@ -1711,6 +1711,103 @@ function setupEventListeners() {
         reportForm.addEventListener('submit', submitLocationReport);
     }
 
+    // Privacy Policy Modal Event Listeners
+    const viewPrivacyPolicyBtn = document.getElementById('viewPrivacyPolicy');
+    const privacyPolicyModal = document.getElementById('privacyPolicyModal');
+    const closePrivacyModalBtn = document.getElementById('closePrivacyModal');
+    const consentPrivacyBtn = document.getElementById('consentPrivacy');
+    const disagreePrivacyBtn = document.getElementById('disagreePrivacy');
+    const consentStatus = document.getElementById('consentStatus');
+
+    // Privacy consent state
+    let privacyConsented = false;
+
+    // Open privacy policy modal
+    if (viewPrivacyPolicyBtn) {
+        viewPrivacyPolicyBtn.addEventListener('click', () => {
+            if (privacyPolicyModal) {
+                privacyPolicyModal.style.display = 'flex';
+            }
+        });
+    }
+
+    // Close privacy policy modal
+    if (closePrivacyModalBtn) {
+        closePrivacyModalBtn.addEventListener('click', () => {
+            if (privacyPolicyModal) {
+                privacyPolicyModal.style.display = 'none';
+            }
+        });
+    }
+
+    // Consent to privacy policy
+    if (consentPrivacyBtn) {
+        consentPrivacyBtn.addEventListener('click', () => {
+            privacyConsented = true;
+            updateConsentStatus(true);
+            if (privacyPolicyModal) {
+                privacyPolicyModal.style.display = 'none';
+            }
+        });
+    }
+
+    // Disagree with privacy policy
+    if (disagreePrivacyBtn) {
+        disagreePrivacyBtn.addEventListener('click', () => {
+            privacyConsented = false;
+            updateConsentStatus(false);
+            if (privacyPolicyModal) {
+                privacyPolicyModal.style.display = 'none';
+            }
+            // Close report modal if user disagrees
+            closeReportModal();
+        });
+    }
+
+    // Close modal when clicking outside
+    if (privacyPolicyModal) {
+        privacyPolicyModal.addEventListener('click', (e) => {
+            if (e.target.id === 'privacyPolicyModal') {
+                privacyPolicyModal.style.display = 'none';
+            }
+        });
+    }
+
+    // Update consent status display
+    function updateConsentStatus(consented) {
+        if (consentStatus) {
+            if (consented) {
+                consentStatus.classList.add('consented');
+                consentStatus.innerHTML = `
+                    <i class="fas fa-check-circle"></i>
+                    <span>Privacy consent given</span>
+                `;
+            } else {
+                consentStatus.classList.remove('consented');
+                consentStatus.innerHTML = `
+                    <i class="fas fa-exclamation-circle"></i>
+                    <span>Privacy consent required</span>
+                `;
+            }
+        }
+        
+        // Enable/disable submit button based on consent
+        const submitBtn = document.querySelector('#reportForm button[type="submit"]');
+        if (submitBtn) {
+            submitBtn.disabled = !consented;
+            if (consented) {
+                submitBtn.style.opacity = '1';
+                submitBtn.style.cursor = 'pointer';
+            } else {
+                submitBtn.style.opacity = '0.5';
+                submitBtn.style.cursor = 'not-allowed';
+            }
+        }
+    }
+
+    // Initialize consent status
+    updateConsentStatus(false);
+
     // Urgency button event listeners
     const urgencyButtons = document.querySelectorAll('.urgency-btn');
     const urgencyLevelInput = document.getElementById('urgencyLevel');
@@ -1943,6 +2040,18 @@ function setupEventListeners() {
     if (reachedViewToggle) {
         reachedViewToggle.addEventListener('change', (event) => {
             setReachedViewActive(event.target.checked);
+        });
+    }
+
+    // Sync map toggle with sidebar toggle
+    const reachedViewToggleMap = document.getElementById('reachedViewToggleMap');
+    if (reachedViewToggleMap) {
+        reachedViewToggleMap.addEventListener('change', (event) => {
+            setReachedViewActive(event.target.checked);
+            // Sync with sidebar toggle
+            if (reachedViewToggle) {
+                reachedViewToggle.checked = event.target.checked;
+            }
         });
     }
 
@@ -4912,6 +5021,12 @@ async function submitDonationLog(event) {
 async function submitLocationReport(e) {
     e.preventDefault();
 
+    // Check privacy consent
+    if (!privacyConsented) {
+        systemAlert('Please review and consent to the Privacy Policy before submitting your report.');
+        return;
+    }
+
     if (!pendingReportCoords) {
         systemAlert('No location selected. Please try again.');
         return;
@@ -5803,6 +5918,12 @@ function updateReachedViewUI() {
 
     if (reachedToggle && reachedToggle.checked !== isReachedViewActive) {
         reachedToggle.checked = isReachedViewActive;
+    }
+
+    // Sync with map toggle
+    const reachedViewToggleMap = document.getElementById('reachedViewToggleMap');
+    if (reachedViewToggleMap && reachedViewToggleMap.checked !== isReachedViewActive) {
+        reachedViewToggleMap.checked = isReachedViewActive;
     }
 
     const labelText = isReachedViewActive ? 'View Reached Locations' : 'View Unreached Locations';

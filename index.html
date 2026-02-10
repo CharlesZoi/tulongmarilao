@@ -64,10 +64,16 @@
 
             <!-- Unreached Locations Dropdown - positioned on map -->
             <div class="pinned-locations-dropdown">
-                <button id="viewPinnedBtn" class="btn btn-info">
-                    <i id="viewPinnedIcon" class="fas fa-map-pin"></i>
-                    <span id="viewPinnedLabel">View Unreached Locations</span> (<span id="pinnedCount">0</span>)
-                </button>
+                <div class="pinned-locations-controls">
+                    <button id="viewPinnedBtn" class="btn btn-info">
+                        <i id="viewPinnedIcon" class="fas fa-map-pin"></i>
+                        <span id="viewPinnedLabel">View Unreached Locations</span> (<span id="pinnedCount">0</span>)
+                    </button>
+                    <label class="toggle-switch map-toggle">
+                        <input type="checkbox" id="reachedViewToggleMap">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
 
                 <div id="pinnedLocationsList" class="pinned-list" style="display: none;">
                     <div class="pinned-list-header">
@@ -536,11 +542,68 @@
                             required>
                     </div>
 
+                    <div class="form-group">
+                        <div class="privacy-consent-section">
+                            <button type="button" id="viewPrivacyPolicy" class="btn btn-outline privacy-policy-btn">
+                                <i class="fas fa-shield-alt"></i> View Privacy Policy
+                            </button>
+                            <div class="consent-status" id="consentStatus">
+                                <i class="fas fa-exclamation-circle"></i>
+                                <span>Privacy consent required</span>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="form-actions">
                         <button type="button" id="cancelReport" class="btn btn-secondary">Cancel</button>
                         <button type="submit" class="btn btn-success">Submit Report</button>
                     </div>
                 </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Privacy Policy Modal -->
+    <div id="privacyPolicyModal" class="modal" style="display: none;">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h3><i class="fas fa-shield-alt"></i> Privacy Policy</h3>
+                <button id="closePrivacyModal" class="close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="privacy-policy-content">
+                    <p><strong>In accordance with global data protection standards, we wish to inform you that we have updated our Privacy Policy to ensure the highest level of transparency. By clicking "Accept" or continuing to browse this site, you acknowledge that you have read and understood our practices regarding your personal data.</strong></p>
+                    
+                    <h4>PRIVACY NOTICE</h4>
+                    <p><strong>Last updated [02/10/26]</strong></p>
+                    
+                    <p>This privacy notice for <strong>Tulong Marilao</strong> describes how and why we might collect, store, and use your information when you use our services, such as when you:</p>
+                    <ul>
+                        <li>Visit our website at <a href="https://tulong-marilao-civtech-ph.netlify.app/" target="_blank">https://tulong-marilao-civtech-ph.netlify.app/</a>, or any website of ours that links to this privacy notice</li>
+                        <li>Engage with us in other related ways ― including any sales, marketing, or events</li>
+                    </ul>
+                    
+                    <p>Questions or concerns? Reading this privacy notice will help you understand your privacy rights and choices. If you do not agree with our policies and practices, please do not use our Services. If you still have any questions or concerns, please contact us.</p>
+                    
+                    <h4>What personal information do we process?</h4>
+                    <p>When you visit, use, or navigate our Services, we may process personal information depending on how you interact with us and the Services, the choices you make, and the products and features you use.</p>
+                    
+                    <h4>Do we process any sensitive personal information?</h4>
+                    <p>We do not process any sensitive information.</p>
+                    
+                    <h4>How do we process your information?</h4>
+                    <p>We process your information to provide, improve, and administer our Services, communicate with you, for security and fraud prevention, and to comply with law. We may also process your information for other purposes with your consent. We process your information only when we have a valid legal reason to do so.</p>
+                    
+                    <h4>What are your rights?</h4>
+                    <p>Depending on where you are located geographically, the applicable privacy law may mean you have certain rights regarding your personal information.</p>
+                    
+                    <h4>How do I exercise my rights?</h4>
+                    <p>The easiest way to exercise your rights is by contacting us. We will consider and act upon any request in accordance with applicable data protection laws.</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" id="disagreePrivacy" class="btn btn-secondary">Disagree</button>
+                <button type="button" id="consentPrivacy" class="btn btn-success">I Consent</button>
             </div>
         </div>
     </div>

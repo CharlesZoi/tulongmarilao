@@ -326,8 +326,16 @@ main {
     color: #f8fafc;
     display: flex;
     align-items: center;
-    justify-content: space-between;
     gap: 0.75rem;
+}
+
+.sidebar-toggle-row:is(.sidebar-action, .sidebar-link, .sidebar-toggle-row)+ :is(.sidebar-action, .sidebar-link, .sidebar-toggle-row) {
+    margin-top: 0.65rem;
+}
+
+/* Hide the "View Reached Locations" toggle from sidebar */
+#reachedViewToggleRow {
+    display: none !important;
 }
 
 .sidebar-toggle-label {
@@ -378,6 +386,66 @@ main {
 
 .toggle-switch input:checked+.toggle-slider::before {
     transform: translateX(20px);
+}
+
+/* Map Toggle Switch Styling */
+.pinned-locations-controls {
+    display: flex !important;
+    align-items: center !important;
+    gap: 0.75rem !important;
+    width: 100% !important;
+    flex-wrap: nowrap !important;
+}
+
+.pinned-locations-dropdown #viewPinnedBtn {
+    white-space: nowrap !important;
+    font-size: 0.7rem !important;
+    padding: 0.4rem 0.6rem !important;
+    min-width: unset !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 0.5rem !important;
+}
+
+.pinned-locations-dropdown #viewPinnedBtn span {
+    white-space: nowrap !important;
+}
+
+.pinned-locations-dropdown #viewPinnedBtn #pinnedCount {
+    white-space: nowrap !important;
+}
+
+.pinned-locations-dropdown .btn {
+    white-space: nowrap !important;
+    font-size: 0.7rem !important;
+    padding: 0.4rem 0.6rem !important;
+    min-width: unset !important;
+}
+
+.map-toggle {
+    margin-left: auto !important;
+    flex-shrink: 0 !important;
+}
+
+.map-toggle .toggle-slider {
+    background-color: rgba(148, 163, 184, 0.4) !important;
+    border-radius: 20px !important;
+}
+
+.map-toggle .toggle-slider::before {
+    border-radius: 50% !important;
+    width: 18px !important;
+    height: 18px !important;
+    left: 4px !important;
+    top: 4px !important;
+    background-color: #f8fafc !important;
+    border: none !important;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.2) !important;
+    transition: transform 0.2s ease !important;
+}
+
+.map-toggle input:checked+.toggle-slider {
+    background-color: rgba(40, 167, 69, 0.7) !important;
 }
 
 .sidebar-action,
@@ -1287,8 +1355,8 @@ button {
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
     max-width: 520px;
     width: 90%;
-    max-height: 90vh;
-    overflow: hidden;
+    max-height: 95vh;
+    overflow: visible;
     position: relative;
     z-index: 100001;
     border: 1px solid rgba(255, 255, 255, 0.2);
@@ -1353,7 +1421,7 @@ button {
 }
 
 .modal-body {
-    padding: 1.5rem;
+    padding: 1.5rem 1.5rem 2rem 1.5rem;
     max-height: calc(90vh - 120px);
     overflow-y: auto;
     scrollbar-width: thin;
@@ -3894,6 +3962,17 @@ body.reporting-mode #map {
         font-size: 0.7rem;
         padding: 0.4rem 0.6rem;
         min-width: auto;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .pinned-locations-dropdown #viewPinnedBtn span {
+        white-space: nowrap;
+    }
+
+    .pinned-locations-dropdown #viewPinnedBtn #pinnedCount {
+        white-space: nowrap;
     }
 
     .pinned-locations-dropdown .btn {
@@ -4713,4 +4792,92 @@ body.reporting-mode #map {
         min-width: auto;
         padding: 0.875rem;
     }
+}
+
+/* Privacy Policy Modal Styles */
+.privacy-policy-content {
+    line-height: 1.6;
+    color: #333;
+}
+
+.privacy-policy-content h4 {
+    color: #0f172a;
+    margin-top: 1.5rem;
+    margin-bottom: 0.75rem;
+    font-size: 1.1rem;
+    font-weight: 600;
+}
+
+.privacy-policy-content ul {
+    margin: 1rem 0;
+    padding-left: 1.5rem;
+}
+
+.privacy-policy-content li {
+    margin-bottom: 0.5rem;
+}
+
+.privacy-policy-content a {
+    color: #28a745;
+    text-decoration: none;
+}
+
+.privacy-policy-content a:hover {
+    text-decoration: underline;
+}
+
+.modal-footer {
+    padding: 1.5rem 2rem;
+    border-top: 1px solid #e5e7eb;
+    display: flex;
+    gap: 1.5rem;
+    justify-content: center;
+    background: #f8f9fa;
+}
+
+/* Privacy Consent Section */
+.privacy-consent-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 1rem;
+    background: #f8f9fa;
+    border-radius: 8px;
+    border: 1px solid #e5e7eb;
+}
+
+.privacy-policy-btn {
+    align-self: flex-start;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: #0f172a;
+    border-color: #0f172a;
+}
+
+.privacy-policy-btn:hover {
+    background: #0f172a;
+    color: white;
+}
+
+.consent-status {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    background: #fef2f2;
+    color: #dc2626;
+    border: 1px solid #fecaca;
+}
+
+.consent-status.consented {
+    background: #f0fdf4;
+    color: #16a34a;
+    border: 1px solid #bbf7d0;
+}
+
+.consent-status i {
+    font-size: 0.9rem;
 }
