@@ -10,6 +10,6 @@
   "scripts": {
     "clean:build": "node tools/clean.js",
     "generate-env": "node tools/generate-env.js",
-    "build": "npm run generate-env && npm run clean:build"
+    "build": "npm run clean:build"
   }
 }
