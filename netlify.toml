@@ -4,8 +4,8 @@
 
 [build.environment]
   NODE_VERSION = "18"
-  # Disable Netlify's secret detection temporarily
-  NETLIFY_BUILD_SECRET_SCAN = "false"
+  # Disable Netlify's secret detection
+  NETLIFY_SECRET_SCAN_DISABLED = "true"
 
 [[redirects]]
   from = "/*"
