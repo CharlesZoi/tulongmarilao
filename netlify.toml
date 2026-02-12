@@ -1,11 +1,9 @@
 [build]
-  command = "npm run build"
   publish = "."
+  # No build command - just deploy files as-is
 
 [build.environment]
   NODE_VERSION = "18"
-  # Disable Netlify's secret detection
-  NETLIFY_SECRET_SCAN_DISABLED = "true"
 
 [[redirects]]
   from = "/*"

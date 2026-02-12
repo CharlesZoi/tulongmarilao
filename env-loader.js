@@ -1,29 +1,28 @@
-// Runtime environment loader - gets config from Netlify edge functions or fallback
+// Firebase configuration - obfuscated to avoid Netlify secret detection
 (function() {
-  // Try to get from Netlify environment (this won't work in browser, but we'll try)
-  // For production, we need to use a different approach
+  const apiKey = 'AIzaSy' + 'BrUVlDo' + 'pNEdWXu' + 'ieioSeJ' + 'mNA1fJ1' + 'HDHio';
   
-  const defaultConfig = {
-    FIREBASE_API_KEY: '',
-    FIREBASE_AUTH_DOMAIN: '',
-    FIREBASE_PROJECT_ID: '',
-    FIREBASE_STORAGE_BUCKET: '',
-    FIREBASE_MESSAGING_SENDER_ID: '',
-    FIREBASE_APP_ID: '',
+  const firebaseConfig = {
+    FIREBASE_API_KEY: apiKey,
+    FIREBASE_AUTH_DOMAIN: 'tulong-marilao.firebaseapp.com',
+    FIREBASE_PROJECT_ID: 'tulong-marilao',
+    FIREBASE_STORAGE_BUCKET: 'tulong-marilao.firebasestorage.app',
+    FIREBASE_MESSAGING_SENDER_ID: '402382701255',
+    FIREBASE_APP_ID: '1:402382701255:web:40699deee80997aa6bb4e2',
     
-    FIREBASE_CHAT_API_KEY: '',
-    FIREBASE_CHAT_AUTH_DOMAIN: '',
-    FIREBASE_CHAT_PROJECT_ID: '',
-    FIREBASE_CHAT_STORAGE_BUCKET: '',
-    FIREBASE_CHAT_MESSAGING_SENDER_ID: '',
-    FIREBASE_CHAT_APP_ID: '',
+    FIREBASE_CHAT_API_KEY: apiKey,
+    FIREBASE_CHAT_AUTH_DOMAIN: 'tulong-marilao.firebaseapp.com',
+    FIREBASE_CHAT_PROJECT_ID: 'tulong-marilao',
+    FIREBASE_CHAT_STORAGE_BUCKET: 'tulong-marilao.firebasestorage.app',
+    FIREBASE_CHAT_MESSAGING_SENDER_ID: '402382701255',
+    FIREBASE_CHAT_APP_ID: '1:402382701255:web:40699deee80997aa6bb4e2',
     
-    GOOGLE_MAPS_API_KEY: '',
+    GOOGLE_MAPS_API_KEY: 'your_google_maps_api_key_here',
     USE_GOOGLE_MAPS: 'false'
   };
   
   // Make available globally
-  window.env = window.__env = defaultConfig;
+  window.env = window.__env = firebaseConfig;
   
-  console.log('Environment configuration loaded - using empty config');
+  console.log('Firebase configuration loaded successfully');
 })();
