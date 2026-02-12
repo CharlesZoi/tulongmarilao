@@ -25,7 +25,6 @@ if (fs.existsSync(envPath)) {
   });
 } else {
   // Fall back to process.env (useful in CI)
-  console.log('No .env file found, using process.env');
   const keys = [
     'FIREBASE_API_KEY','FIREBASE_AUTH_DOMAIN','FIREBASE_PROJECT_ID','FIREBASE_STORAGE_BUCKET','FIREBASE_MESSAGING_SENDER_ID','FIREBASE_APP_ID',
     'FIREBASE_CHAT_API_KEY','FIREBASE_CHAT_AUTH_DOMAIN','FIREBASE_CHAT_PROJECT_ID','FIREBASE_CHAT_STORAGE_BUCKET','FIREBASE_CHAT_MESSAGING_SENDER_ID','FIREBASE_CHAT_APP_ID',
@@ -34,9 +33,6 @@ if (fs.existsSync(envPath)) {
   keys.forEach(k => {
     if (process.env[k]) {
       env[k] = process.env[k];
-      console.log(`Found ${k}: ${k.includes('KEY') ? '[REDACTED]' : process.env[k]}`);
-    } else {
-      console.log(`Missing ${k}`);
     }
   });
 }
