@@ -7073,11 +7073,11 @@ function createImageGallery(images, locationId, report) {
         <div class="popup-images" id="popupImages-${locationId}">
             <div class="photos-header" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
                 <h5 style="margin: 0;"><i class="fas fa-images"></i> ${headerText}</h5>
-                <button onclick="togglePhotos('${locationId}')" class="btn-toggle-photos" style="background: none; border: none; color: #666; cursor: pointer; padding: 5px; border-radius: 4px; transition: background-color 0.2s;" title="Hide photos">
-                    <i class="fas fa-eye" id="photoToggle-${locationId}"></i>
+                <button onclick="togglePhotos('${locationId}')" class="btn-toggle-photos" style="background: none; border: none; color: #666; cursor: pointer; padding: 5px; border-radius: 4px; transition: background-color 0.2s;" title="Show photos">
+                    <i class="fas fa-eye-slash" id="photoToggle-${locationId}"></i>
                 </button>
             </div>
-            <div class="popup-image-gallery" id="photoGallery-${locationId}" style="display: block;">
+            <div class="popup-image-gallery" id="photoGallery-${locationId}" style="display: none;">
                 ${imageItems}
             </div>
         </div>
