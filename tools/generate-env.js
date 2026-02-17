@@ -8,28 +8,38 @@ const envPath = path.join(root, '.env');
 const outPath = path.join(root, 'env-config.js');
 
 let env = {};
+const keys = [
+  'FIREBASE_API_KEY','FIREBASE_AUTH_DOMAIN','FIREBASE_PROJECT_ID','FIREBASE_STORAGE_BUCKET','FIREBASE_MESSAGING_SENDER_ID','FIREBASE_APP_ID',
+  'FIREBASE_CHAT_API_KEY','FIREBASE_CHAT_AUTH_DOMAIN','FIREBASE_CHAT_PROJECT_ID','FIREBASE_CHAT_STORAGE_BUCKET','FIREBASE_CHAT_MESSAGING_SENDER_ID','FIREBASE_CHAT_APP_ID',
+  'GOOGLE_MAPS_API_KEY','USE_GOOGLE_MAPS'
+];
 
-if (fs.existsSync(envPath)) {
-  const src = fs.readFileSync(envPath, 'utf8');
-  src.split(/\r?\n/).forEach(line => {
+function parseEnvSource(raw) {
+  let src = raw.toString('utf8');
+  if (src.includes('\u0000')) {
+    src = raw.toString('utf16le');
+  }
+
+  const parsed = {};
+  src.replace(/^\uFEFF/, '').split(/\r?\n/).forEach((line) => {
     const m = line.match(/^\s*([^#=]+?)\s*=\s*(.*)\s*$/);
     if (m) {
-      let key = m[1].trim();
+      const key = m[1].trim();
       let val = m[2].trim();
-      // remove surrounding quotes if present
       if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
         val = val.slice(1, -1);
       }
-      env[key] = val;
+      parsed[key] = val;
     }
   });
+
+  return parsed;
+}
+
+if (fs.existsSync(envPath)) {
+  env = parseEnvSource(fs.readFileSync(envPath));
 } else {
   // Fall back to process.env (useful in CI)
-  const keys = [
-    'FIREBASE_API_KEY','FIREBASE_AUTH_DOMAIN','FIREBASE_PROJECT_ID','FIREBASE_STORAGE_BUCKET','FIREBASE_MESSAGING_SENDER_ID','FIREBASE_APP_ID',
-    'FIREBASE_CHAT_API_KEY','FIREBASE_CHAT_AUTH_DOMAIN','FIREBASE_CHAT_PROJECT_ID','FIREBASE_CHAT_STORAGE_BUCKET','FIREBASE_CHAT_MESSAGING_SENDER_ID','FIREBASE_CHAT_APP_ID',
-    'GOOGLE_MAPS_API_KEY','USE_GOOGLE_MAPS'
-  ];
   keys.forEach(k => {
     if (process.env[k]) {
       env[k] = process.env[k];

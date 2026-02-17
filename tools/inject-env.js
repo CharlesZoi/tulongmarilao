@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 
 const root = path.join(__dirname, '..');
+const envPath = path.join(root, '.env');
 
 // Get environment variables
 const env = {};
@@ -13,7 +14,42 @@ const keys = [
   'GOOGLE_MAPS_API_KEY','USE_GOOGLE_MAPS'
 ];
 
-keys.forEach(k => {
+function readEnvFile(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return {};
+  }
+
+  const raw = fs.readFileSync(filePath);
+  let src = raw.toString('utf8');
+
+  // Handle UTF-16 encoded .env files (common on Windows editors).
+  if (src.includes('\u0000')) {
+    src = raw.toString('utf16le');
+  }
+
+  const parsed = {};
+  src.replace(/^\uFEFF/, '').split(/\r?\n/).forEach((line) => {
+    const m = line.match(/^\s*([^#=]+?)\s*=\s*(.*)\s*$/);
+    if (m) {
+      const key = m[1].trim();
+      let val = m[2].trim();
+      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+        val = val.slice(1, -1);
+      }
+      parsed[key] = val;
+    }
+  });
+
+  return parsed;
+}
+
+const fileEnv = readEnvFile(envPath);
+
+keys.forEach((k) => {
+  if (fileEnv[k]) {
+    env[k] = fileEnv[k];
+    return;
+  }
   if (process.env[k]) {
     env[k] = process.env[k];
   }

@@ -1,4 +1,4 @@
-const CACHE_VERSION = '2026-01-27-01';
+const CACHE_VERSION = '2026-02-17-01';
 const CACHE_NAME = `marilao-relief-map-${CACHE_VERSION}`;
 const urlsToCache = [
   './',
@@ -8,19 +8,23 @@ const urlsToCache = [
   './manifest.json',
   './firebase-config.js',
   './firebase-chat-config.js',
-  './signup.html',
-  'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
-  'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js',
-  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css'
+  './env-loader.js'
 ];
 
 // Install event - cache resources
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then((cache) => {
+      .then(async (cache) => {
         console.log('Service Worker: Caching files');
-        return cache.addAll(urlsToCache);
+        const results = await Promise.allSettled(urlsToCache.map((url) => cache.add(url)));
+        const failed = results
+          .map((result, index) => ({ result, url: urlsToCache[index] }))
+          .filter(({ result }) => result.status === 'rejected');
+
+        if (failed.length > 0) {
+          console.warn('Service Worker: Some cache entries failed', failed.map((f) => f.url));
+        }
       })
       .catch((error) => {
         console.error('Service Worker: Cache failed', error);

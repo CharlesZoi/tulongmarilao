@@ -1013,6 +1013,7 @@ let marilaoBoundaryLayer = null;
 let mapDefaultBounds = null;
 let activePopupLatLng = null;
 let lastZoomLevel = null;
+let privacyConsented = false;
 
 // Firebase Firestore functions
 let db = null;
@@ -1718,9 +1719,6 @@ function setupEventListeners() {
     const consentPrivacyBtn = document.getElementById('consentPrivacy');
     const disagreePrivacyBtn = document.getElementById('disagreePrivacy');
     const consentStatus = document.getElementById('consentStatus');
-
-    // Privacy consent state
-    let privacyConsented = false;
 
     // Open privacy policy modal
     if (viewPrivacyPolicyBtn) {

@@ -11,6 +11,7 @@
     "clean:build": "node tools/clean.js",
     "generate-env": "node tools/generate-env.js",
     "inject-env": "node tools/inject-env.js",
-    "build": "npm run inject-env && npm run clean:build"
+    "build": "npm run inject-env && npm run clean:build",
+    "dev": "npm run inject-env && npx http-server . -p 3000 -o -c-1"
   }
 }
