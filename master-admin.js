@@ -9,10 +9,13 @@ let currentDeleteId = null;
 let lastImportedIds = []; // Track IDs of last imported locations for undo
 let selectedLocationForDeletion = null;
 let selectedLocationForDetails = null;
+let selectedLocationForEdit = null;
 let unsubscribeListener = null; // Firestore listener unsubscribe function
 let donationLogs = [];
 let selectedDonationLog = null;
 let donationLogsUnsubscribe = null;
+let filteredSupportedLocations = [];
+let activeRowActionsMenuId = null;
 
 // Security instances
 let rateLimiter = null;
@@ -148,9 +151,34 @@ function setupEventListeners() {
         showPinsBtn.addEventListener('click', () => setActiveSection('pins'));
     }
 
+    const showSupportedLocationsBtn = document.getElementById('showSupportedLocationsBtn');
+    if (showSupportedLocationsBtn) {
+        showSupportedLocationsBtn.addEventListener('click', () => setActiveSection('supported'));
+    }
+
     const showDonationLogsBtn = document.getElementById('showDonationLogsBtn');
     if (showDonationLogsBtn) {
         showDonationLogsBtn.addEventListener('click', () => setActiveSection('donationLogs'));
+    }
+
+    const supportedSearchInput = document.getElementById('supportedSearch');
+    if (supportedSearchInput) {
+        supportedSearchInput.addEventListener('input', renderSupportedLocationsTable);
+    }
+
+    const supportedStatusFilter = document.getElementById('supportedStatusFilter');
+    if (supportedStatusFilter) {
+        supportedStatusFilter.addEventListener('change', renderSupportedLocationsTable);
+    }
+
+    const supportedUrgencyFilter = document.getElementById('supportedUrgencyFilter');
+    if (supportedUrgencyFilter) {
+        supportedUrgencyFilter.addEventListener('change', renderSupportedLocationsTable);
+    }
+
+    const refreshSupportedLocationsBtn = document.getElementById('refreshSupportedLocations');
+    if (refreshSupportedLocationsBtn) {
+        refreshSupportedLocationsBtn.addEventListener('click', renderSupportedLocationsTable);
     }
 
     const refreshDonationBtn = document.getElementById('refreshDonationLogs');
@@ -202,6 +230,20 @@ function setupEventListeners() {
     document.getElementById('closeDetailsBtn').addEventListener('click', closeDetailsModal);
     document.getElementById('viewOnMapBtn').addEventListener('click', viewOnMap);
 
+    // Edit modal
+    const closeEditLocationModalBtn = document.getElementById('closeEditLocationModal');
+    if (closeEditLocationModalBtn) {
+        closeEditLocationModalBtn.addEventListener('click', closeEditLocationModal);
+    }
+    const cancelEditLocationBtn = document.getElementById('cancelEditLocation');
+    if (cancelEditLocationBtn) {
+        cancelEditLocationBtn.addEventListener('click', closeEditLocationModal);
+    }
+    const saveEditLocationBtn = document.getElementById('saveEditLocation');
+    if (saveEditLocationBtn) {
+        saveEditLocationBtn.addEventListener('click', saveEditLocation);
+    }
+
     const closeDonationModalBtn = document.getElementById('closeDonationLogModal');
     if (closeDonationModalBtn) {
         closeDonationModalBtn.addEventListener('click', closeDonationLogModal);
@@ -213,6 +255,10 @@ function setupEventListeners() {
     const rejectDonationBtn = document.getElementById('rejectDonationLog');
     if (rejectDonationBtn) {
         rejectDonationBtn.addEventListener('click', handleDonationLogReject);
+    }
+    const undoDonationBtn = document.getElementById('undoDonationLogDecision');
+    if (undoDonationBtn) {
+        undoDonationBtn.addEventListener('click', handleDonationLogUndo);
     }
 
     // Help modal
@@ -232,6 +278,12 @@ function setupEventListeners() {
     document.getElementById('detailsModal').addEventListener('click', (e) => {
         if (e.target.id === 'detailsModal') closeDetailsModal();
     });
+    const editLocationModal = document.getElementById('editLocationModal');
+    if (editLocationModal) {
+        editLocationModal.addEventListener('click', (e) => {
+            if (e.target.id === 'editLocationModal') closeEditLocationModal();
+        });
+    }
     const donationLogModal = document.getElementById('donationLogModal');
     if (donationLogModal) {
         donationLogModal.addEventListener('click', (e) => {
@@ -240,6 +292,18 @@ function setupEventListeners() {
     }
     document.getElementById('helpModal').addEventListener('click', (e) => {
         if (e.target.id === 'helpModal') closeHelpModal();
+    });
+
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.row-actions-menu')) {
+            closeAllRowActionMenus();
+        }
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            closeAllRowActionMenus();
+        }
     });
 }
 
@@ -373,6 +437,7 @@ async function handleLogout() {
         currentUser = null;
         allLocations = [];
         filteredLocations = [];
+        filteredSupportedLocations = [];
         donationLogs = [];
         selectedDonationLog = null;
 
@@ -452,7 +517,7 @@ function showDashboard() {
                     <strong style="color: #0066cc;">User Admin Access</strong>
                     <p style="margin: 0.25rem 0 0 0; color: #333; font-size: 0.9rem;">
                         Click <strong>"View Map"</strong> to access the public map. 
-                        You can view and add pins, but cannot delete them. Use the checkboxes here to mark locations as reached.
+                        You can view and add pins, but cannot delete them. Use the Supported Locations tab to mark locations as reached.
                     </p>
                 `;
             }
@@ -464,22 +529,38 @@ function showDashboard() {
 
 function setActiveSection(section) {
     const pinsSection = document.getElementById('pinsSection');
+    const supportedSection = document.getElementById('supportedSection');
     const donationLogsSection = document.getElementById('donationLogsSection');
     const showPinsBtn = document.getElementById('showPinsBtn');
+    const showSupportedLocationsBtn = document.getElementById('showSupportedLocationsBtn');
     const showDonationLogsBtn = document.getElementById('showDonationLogsBtn');
 
-    if (!pinsSection || !donationLogsSection || !showPinsBtn || !showDonationLogsBtn) {
+    if (!pinsSection || !supportedSection || !donationLogsSection || !showPinsBtn || !showSupportedLocationsBtn || !showDonationLogsBtn) {
         return;
     }
 
+    closeAllRowActionMenus();
+
     const isPins = section === 'pins';
+    const isSupported = section === 'supported';
+    const isDonationLogs = section === 'donationLogs';
+
     pinsSection.style.display = isPins ? 'block' : 'none';
-    donationLogsSection.style.display = isPins ? 'none' : 'block';
+    supportedSection.style.display = isSupported ? 'block' : 'none';
+    donationLogsSection.style.display = isDonationLogs ? 'block' : 'none';
 
     showPinsBtn.classList.toggle('is-active', isPins);
-    showDonationLogsBtn.classList.toggle('is-active', !isPins);
+    showSupportedLocationsBtn.classList.toggle('is-active', isSupported);
+    showDonationLogsBtn.classList.toggle('is-active', isDonationLogs);
     showPinsBtn.setAttribute('aria-pressed', String(isPins));
-    showDonationLogsBtn.setAttribute('aria-pressed', String(!isPins));
+    showSupportedLocationsBtn.setAttribute('aria-pressed', String(isSupported));
+    showDonationLogsBtn.setAttribute('aria-pressed', String(isDonationLogs));
+
+    if (isSupported) {
+        renderSupportedLocationsTable();
+    } else if (isDonationLogs) {
+        renderDonationLogs();
+    }
 }
 
 // Load locations from local storage
@@ -492,6 +573,7 @@ function loadLocationsFromLocalStorage() {
             console.log(`Loaded ${allLocations.length} locations from local storage`);
             updateStats();
             applyFilters();
+            renderSupportedLocationsTable();
             showSuccess('Using locally saved data (offline mode)');
             return true;
         }
@@ -529,6 +611,7 @@ async function loadAllLocations() {
                 console.log(`Loaded ${allLocations.length} locations from Firestore`);
                 updateStats();
                 applyFilters();
+                renderSupportedLocationsTable();
                 renderDonationLogs();
 
                 // If we were using local data before, show a success message
@@ -587,11 +670,13 @@ async function loadDonationLogs() {
                 });
 
                 renderDonationLogs();
+                renderSupportedLocationsTable();
             },
             (error) => {
                 console.error('Error loading donation logs:', error);
                 donationLogs = [];
                 renderDonationLogs();
+                renderSupportedLocationsTable();
                 showError('Failed to load donation logs. Please refresh the page.');
             }
         );
@@ -599,6 +684,7 @@ async function loadDonationLogs() {
         console.error('Error setting up donation log listener:', error);
         donationLogs = [];
         renderDonationLogs();
+        renderSupportedLocationsTable();
         showError('Failed to load donation logs. Please check your connection and refresh.');
     }
 }
@@ -632,6 +718,7 @@ function renderDonationLogs() {
             const matchesSearch = !searchTerm || getDonationSearchText(log).includes(searchTerm);
             const matchesDelivery = deliveryFilterValue === 'all' ||
                 (deliveryFilterValue === 'on-the-way' && deliveryStatus.status === 'on-the-way') ||
+                (deliveryFilterValue === 'proof-submitted' && deliveryStatus.status === 'proof-submitted') ||
                 (deliveryFilterValue === 'reached' && deliveryStatus.status === 'reached');
             return matchesSearch && matchesDelivery;
         });
@@ -720,6 +807,7 @@ function getDonationDeliveryStatus(log) {
         return { status: 'pending', label: 'Awaiting update' };
     }
 
+    const verificationStatus = normalizeDonationStatus(log.verificationStatus);
     const normalizedStatus = [
         log.deliveryStatus,
         log.delivery_status,
@@ -735,14 +823,20 @@ function getDonationDeliveryStatus(log) {
     const isOnTheWay = log.onTheWay === true || log.on_the_way === true || log.isOnTheWay === true;
 
     let status = null;
-    if (hasReached || (normalizedStatus && (normalizedStatus.includes('reach') || normalizedStatus.includes('deliver') || normalizedStatus.includes('complete')))) {
+    if (verificationStatus === 'approved' ||
+        hasReached ||
+        (normalizedStatus && (normalizedStatus.includes('reach') || normalizedStatus.includes('deliver') || normalizedStatus.includes('complete')))) {
         status = 'reached';
+    } else if (verificationStatus === 'pending') {
+        status = 'proof-submitted';
     } else if (isOnTheWay || (normalizedStatus && (normalizedStatus.includes('on the way') || normalizedStatus.includes('on_the_way') || normalizedStatus.includes('on-the-way') || normalizedStatus.includes('ontheway') || normalizedStatus.includes('enroute') || normalizedStatus.includes('en route')))) {
         status = 'on-the-way';
     } else {
         const locationStatus = getDonationLocationStatus(log);
         if (locationStatus && locationStatus.isReached) {
             status = 'reached';
+        } else if (locationStatus && locationStatus.isProofSubmitted) {
+            status = 'proof-submitted';
         } else if (locationStatus && locationStatus.isOnTheWay) {
             status = 'on-the-way';
         } else {
@@ -752,6 +846,8 @@ function getDonationDeliveryStatus(log) {
 
     const label = status === 'reached'
         ? 'Donations reached'
+        : status === 'proof-submitted'
+            ? 'Proof submitted'
         : status === 'on-the-way'
             ? 'On-the-way operations'
             : 'Awaiting update';
@@ -778,7 +874,15 @@ function getDonationLocationStatus(log) {
         .find(value => value);
     const responseStatusValue = (location.responseStatus || location.reliefStatus || '').toString().toLowerCase();
     const supportStatusValue = (location.supportStatus || location.support_status || '').toString().toLowerCase();
-    const isOnTheWay = !isReached && (
+    const isProofSubmitted = !isReached && (
+        supportStatusValue.includes('proof submitted') ||
+        supportStatusValue.includes('proof_submitted') ||
+        responseStatusValue.includes('proof submitted') ||
+        responseStatusValue.includes('proof_submitted') ||
+        location.proofVerificationStatus === 'pending' ||
+        Boolean(location.proofSubmittedAt)
+    );
+    const isOnTheWay = !isReached && !isProofSubmitted && (
         location.onTheWay === true ||
         location.on_the_way === true ||
         supportStatusValue.includes('on the way') ||
@@ -793,7 +897,7 @@ function getDonationLocationStatus(log) {
         Boolean(respondingName)
     );
 
-    return { isReached, isOnTheWay };
+    return { isReached, isProofSubmitted, isOnTheWay };
 }
 
 function findDonationLogLocation(log) {
@@ -1159,21 +1263,119 @@ function closeHelpModal() {
     }
 }
 
+async function syncLocationFromDonationDecision(log, status, verifierEmail, verifiedAtIso) {
+    const location = findDonationLogLocation(log);
+    if (!location || !location.firestoreId || !db) {
+        return;
+    }
+
+    const nowIso = verifiedAtIso || new Date().toISOString();
+    const responderName = [
+        location.reachedByTeam,
+        location.respondingTeam,
+        location.responseTeam,
+        location.supportedByName,
+        location.supporterName,
+        location.donorResponding,
+        log && log.donorName
+    ]
+        .map(value => (value || '').toString().trim())
+        .find(value => value) || 'Support Team';
+
+    let locationUpdate = null;
+    if (status === 'approved') {
+        locationUpdate = {
+            reached: true,
+            reachedAt: nowIso,
+            reachedBy: verifierEmail || 'master-admin',
+            reachedByTeam: responderName,
+            onTheWay: false,
+            on_the_way: false,
+            responseStatus: 'reached',
+            supportStatus: 'reached',
+            proofVerificationStatus: 'approved',
+            proofSubmittedAt: location.proofSubmittedAt || (log.submittedAtIso || log.submittedAt || nowIso),
+            proofSubmittedBy: location.proofSubmittedBy || log.donorName || responderName,
+            proofVerifiedAt: nowIso,
+            proofVerifiedBy: verifierEmail || 'master-admin',
+            proofRejectedAt: null
+        };
+    } else if (status === 'rejected') {
+        locationUpdate = {
+            reached: false,
+            reachedAt: null,
+            reachedBy: null,
+            reachedByTeam: null,
+            onTheWay: true,
+            on_the_way: true,
+            responseStatus: 'on the way',
+            supportStatus: 'on_the_way',
+            proofVerificationStatus: 'rejected',
+            proofSubmittedAt: location.proofSubmittedAt || (log.submittedAtIso || log.submittedAt || nowIso),
+            proofSubmittedBy: location.proofSubmittedBy || log.donorName || responderName,
+            proofVerifiedAt: nowIso,
+            proofVerifiedBy: verifierEmail || 'master-admin',
+            proofRejectedAt: nowIso
+        };
+    } else if (status === 'pending') {
+        locationUpdate = {
+            reached: false,
+            reachedAt: null,
+            reachedBy: null,
+            reachedByTeam: null,
+            onTheWay: true,
+            on_the_way: true,
+            responseStatus: 'proof submitted',
+            supportStatus: 'proof_submitted',
+            proofVerificationStatus: 'pending',
+            proofSubmittedAt: location.proofSubmittedAt || (log.submittedAtIso || log.submittedAt || nowIso),
+            proofSubmittedBy: location.proofSubmittedBy || log.donorName || responderName,
+            proofVerifiedAt: null,
+            proofVerifiedBy: null,
+            proofRejectedAt: null
+        };
+    }
+
+    if (!locationUpdate) {
+        return;
+    }
+
+    const { doc, updateDoc } = await import('https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js');
+    await updateDoc(doc(db, 'relief-locations', location.firestoreId), locationUpdate);
+
+    const locationIndex = allLocations.findIndex((entry) => entry.firestoreId === location.firestoreId);
+    if (locationIndex > -1) {
+        allLocations[locationIndex] = {
+            ...allLocations[locationIndex],
+            ...locationUpdate
+        };
+    }
+}
+
 function updateDonationActionButtons(status) {
     const approveBtn = document.getElementById('approveDonationLog');
     const rejectBtn = document.getElementById('rejectDonationLog');
+    const undoBtn = document.getElementById('undoDonationLogDecision');
 
-    if (!approveBtn || !rejectBtn) {
+    if (!approveBtn || !rejectBtn || !undoBtn) {
         return;
     }
 
     const isPending = status === 'pending';
+    const isApproved = status === 'approved';
+    const isRejected = status === 'rejected';
+
+    approveBtn.style.display = isPending ? 'inline-flex' : 'none';
+    rejectBtn.style.display = isPending ? 'inline-flex' : 'none';
+    undoBtn.style.display = isPending ? 'none' : 'inline-flex';
 
     approveBtn.disabled = !isPending;
     rejectBtn.disabled = !isPending;
+    undoBtn.disabled = isPending;
 
-    approveBtn.innerHTML = `<i class="fas fa-check"></i> ${status === 'approved' ? 'Approved' : 'Approve'}`;
-    rejectBtn.innerHTML = `<i class="fas fa-times"></i> ${status === 'rejected' ? 'Rejected' : 'Reject'}`;
+    approveBtn.innerHTML = '<i class="fas fa-check"></i> Approve';
+    rejectBtn.innerHTML = '<i class="fas fa-times"></i> Reject';
+    undoBtn.innerHTML = `<i class="fas fa-rotate-left"></i> ${isApproved ? 'Undo approval' : (isRejected ? 'Undo rejection' : 'Undo decision')}`;
 }
 
 function handleDonationLogApprove() {
@@ -1197,6 +1399,25 @@ function handleDonationLogReject() {
     updateDonationLogStatus('rejected');
 }
 
+function handleDonationLogUndo() {
+    if (!selectedDonationLog) {
+        return;
+    }
+
+    const currentStatus = normalizeDonationStatus(selectedDonationLog.verificationStatus);
+    if (currentStatus === 'pending') {
+        return;
+    }
+
+    const actionLabel = currentStatus === 'approved' ? 'approval' : 'rejection';
+    const confirmed = confirm(`Undo ${actionLabel} and set this donation log back to pending?`);
+    if (!confirmed) {
+        return;
+    }
+
+    updateDonationLogStatus('pending');
+}
+
 async function updateDonationLogStatus(status) {
     if (!selectedDonationLog) {
         return;
@@ -1204,21 +1425,29 @@ async function updateDonationLogStatus(status) {
 
     const approveBtn = document.getElementById('approveDonationLog');
     const rejectBtn = document.getElementById('rejectDonationLog');
+    const undoBtn = document.getElementById('undoDonationLogDecision');
     const originalApproveHTML = approveBtn ? approveBtn.innerHTML : '';
     const originalRejectHTML = rejectBtn ? rejectBtn.innerHTML : '';
-    const targetBtn = status === 'approved' ? approveBtn : rejectBtn;
-    const loadingLabel = status === 'approved' ? 'Approving...' : 'Rejecting...';
+    const originalUndoHTML = undoBtn ? undoBtn.innerHTML : '';
+    const targetBtn = status === 'approved'
+        ? approveBtn
+        : (status === 'rejected' ? rejectBtn : undoBtn);
+    const loadingLabel = status === 'approved'
+        ? 'Approving...'
+        : (status === 'rejected' ? 'Rejecting...' : 'Reverting...');
 
     if (approveBtn) approveBtn.disabled = true;
     if (rejectBtn) rejectBtn.disabled = true;
+    if (undoBtn) undoBtn.disabled = true;
     if (targetBtn) {
         targetBtn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${loadingLabel}`;
     }
 
     try {
         const { doc, updateDoc } = await import('https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js');
-        const verifiedAt = new Date().toISOString();
-        const verifiedBy = currentUser ? currentUser.email : 'admin';
+        const isPendingStatus = status === 'pending';
+        const verifiedAt = isPendingStatus ? null : new Date().toISOString();
+        const verifiedBy = isPendingStatus ? null : (currentUser ? currentUser.email : 'admin');
 
         await updateDoc(doc(db, 'donation-logs', selectedDonationLog.firestoreId), {
             verificationStatus: status,
@@ -1243,15 +1472,26 @@ async function updateDonationLogStatus(status) {
             };
         }
 
+        try {
+            await syncLocationFromDonationDecision(selectedDonationLog, status, verifiedBy, verifiedAt || new Date().toISOString());
+        } catch (syncError) {
+            console.warn('Donation decision saved, but location sync failed:', syncError);
+            showError('Donation log updated, but location status sync failed.');
+        }
+
+        updateStats();
+        applyFilters();
+        renderSupportedLocationsTable();
         renderDonationLogDetails(selectedDonationLog);
         updateDonationActionButtons(status);
         renderDonationLogs();
-        showSuccess(`Donation log ${status}.`);
+        showSuccess(status === 'pending' ? 'Donation log reset to pending.' : `Donation log ${status}.`);
     } catch (error) {
         console.error('Error updating donation log:', error);
         showError('Failed to update donation log. Please try again.');
         if (approveBtn) approveBtn.innerHTML = originalApproveHTML;
         if (rejectBtn) rejectBtn.innerHTML = originalRejectHTML;
+        if (undoBtn) undoBtn.innerHTML = originalUndoHTML;
         updateDonationActionButtons(normalizeDonationStatus(selectedDonationLog.verificationStatus));
     }
 }
@@ -1335,6 +1575,216 @@ function applyFilters() {
     renderTable();
 }
 
+function buildRowActionsMenu(location, context = 'pins') {
+    if (!location || !location.firestoreId) {
+        return '';
+    }
+
+    const firestoreId = String(location.firestoreId);
+    const safeMenuId = `rowActions_${context}_${firestoreId.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+    const donationAction = context === 'supported'
+        ? `
+            <button type="button" class="row-actions-item" onclick="closeAllRowActionMenus(); openDonationWorkflowForLocation('${firestoreId}')">
+                <i class="fas fa-hand-holding-heart"></i> Donation workflow
+            </button>
+        `
+        : '';
+
+    return `
+        <div class="row-actions-menu">
+            <button type="button" class="btn-icon row-actions-trigger" onclick="toggleRowActionsMenu(event, '${safeMenuId}')" title="More actions">
+                <i class="fas fa-ellipsis-vertical"></i>
+            </button>
+            <div id="${safeMenuId}" class="row-actions-dropdown">
+                <button type="button" class="row-actions-item" onclick="closeAllRowActionMenus(); viewDetails('${firestoreId}')">
+                    <i class="fas fa-eye"></i> View details
+                </button>
+                <button type="button" class="row-actions-item" onclick="closeAllRowActionMenus(); openLocationOnMapById('${firestoreId}')">
+                    <i class="fas fa-map-marker-alt"></i> Open on map
+                </button>
+                ${donationAction}
+                <button type="button" class="row-actions-item" onclick="closeAllRowActionMenus(); openEditLocationModal('${firestoreId}')">
+                    <i class="fas fa-pen-to-square"></i> Edit pin
+                </button>
+                <button type="button" class="row-actions-item is-danger" onclick="closeAllRowActionMenus(); showDeleteModal('${firestoreId}')">
+                    <i class="fas fa-trash"></i> Delete pin
+                </button>
+            </div>
+        </div>
+    `;
+}
+
+function toggleRowActionsMenu(event, menuId) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+
+    const menu = document.getElementById(menuId);
+    if (!menu) {
+        return;
+    }
+
+    const shouldOpen = !menu.classList.contains('is-open');
+    closeAllRowActionMenus();
+
+    if (shouldOpen) {
+        menu.classList.add('is-open');
+        menu.style.display = 'flex';
+        menu.style.flexDirection = 'column';
+        menu.style.alignItems = 'stretch';
+        menu.style.gap = '2px';
+        activeRowActionsMenuId = menuId;
+    }
+}
+
+function closeAllRowActionMenus() {
+    document.querySelectorAll('.row-actions-dropdown.is-open').forEach((menu) => {
+        menu.classList.remove('is-open');
+        menu.style.display = 'none';
+        menu.style.removeProperty('flex-direction');
+        menu.style.removeProperty('align-items');
+        menu.style.removeProperty('gap');
+    });
+    activeRowActionsMenuId = null;
+}
+
+function findLocationByAnyId(locationId) {
+    if (!locationId) {
+        return null;
+    }
+
+    return allLocations.find((loc) => (
+        loc &&
+        (
+            loc.firestoreId === locationId ||
+            loc.id === locationId ||
+            loc.locationId === locationId
+        )
+    )) || null;
+}
+
+function openLocationOnMapById(firestoreId) {
+    const location = findLocationByAnyId(firestoreId);
+    if (!location || !Array.isArray(location.coords) || location.coords.length !== 2) {
+        showError('Location coordinates are not available.');
+        return;
+    }
+
+    const lat = Number(location.coords[0]);
+    const lng = Number(location.coords[1]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        showError('Location coordinates are not valid.');
+        return;
+    }
+
+    closeAllRowActionMenus();
+    window.open(`admin-map.html#${lat},${lng},15`, '_blank');
+}
+
+function openDonationWorkflowForLocation(firestoreId) {
+    const location = findLocationByAnyId(firestoreId);
+    if (!location) {
+        return;
+    }
+
+    closeAllRowActionMenus();
+    setActiveSection('donationLogs');
+
+    const donationSearchInput = document.getElementById('donationSearch');
+    if (donationSearchInput) {
+        donationSearchInput.value = location.name || '';
+    }
+
+    renderDonationLogs();
+    showSuccess('Opened Donation Logs. Approving proof will mark the location as reached automatically.');
+}
+
+function pingSupporterForProof(firestoreId) {
+    const location = findLocationByAnyId(firestoreId);
+    if (!location) {
+        return;
+    }
+
+    const responderName = [
+        location.donorResponding,
+        location.respondingTeam,
+        location.responseTeam,
+        location.supportedByName,
+        location.supporterName
+    ]
+        .map(value => (value || '').toString().trim())
+        .find(value => value) || 'assigned supporter';
+    const contact = (location.supporterContact || '').toString().trim();
+
+    openDonationWorkflowForLocation(firestoreId);
+
+    if (contact) {
+        showSuccess(`Ping supporter: Ask ${responderName} (${contact}) to submit donation proof.`);
+    } else {
+        showSuccess(`Ping supporter: Ask ${responderName} to submit donation proof.`);
+    }
+}
+
+function donationLogBelongsToLocation(log, location) {
+    if (!log || !location) {
+        return false;
+    }
+
+    const normalizeText = (value) => (value || '').toString().trim().toLowerCase();
+    const locationIdCandidates = [
+        log.locationId,
+        log.location && log.location.id,
+        log.location && log.location.firestoreId
+    ]
+        .filter(Boolean)
+        .map(String);
+    const locationIdentityCandidates = [
+        location.firestoreId,
+        location.id
+    ]
+        .filter(Boolean)
+        .map(String);
+
+    if (locationIdCandidates.some(id => locationIdentityCandidates.includes(id))) {
+        return true;
+    }
+
+    const logLocationName = normalizeText(log.location && log.location.name);
+    const locationName = normalizeText(location.name);
+    if (logLocationName && locationName && logLocationName === locationName) {
+        return true;
+    }
+
+    const logCoords = log.location && Array.isArray(log.location.coords) ? log.location.coords : null;
+    const locCoords = Array.isArray(location.coords) ? location.coords : null;
+    if (Array.isArray(logCoords) && logCoords.length === 2 && Array.isArray(locCoords) && locCoords.length === 2) {
+        const [logLat, logLng] = [Number(logCoords[0]), Number(logCoords[1])];
+        const [locLat, locLng] = [Number(locCoords[0]), Number(locCoords[1])];
+        if (Number.isFinite(logLat) && Number.isFinite(logLng) && Number.isFinite(locLat) && Number.isFinite(locLng)) {
+            const roundedLog = `${logLat.toFixed(4)},${logLng.toFixed(4)}`;
+            const roundedLoc = `${locLat.toFixed(4)},${locLng.toFixed(4)}`;
+            if (roundedLog === roundedLoc) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+function hasApprovedDonationProofForLocation(firestoreId) {
+    const location = findLocationByAnyId(firestoreId);
+    if (!location) {
+        return false;
+    }
+
+    return donationLogs.some((log) => (
+        normalizeDonationStatus(log.verificationStatus) === 'approved' &&
+        donationLogBelongsToLocation(log, location)
+    ));
+}
+
 // Render pins table
 function renderTable() {
     const tbody = document.getElementById('pinsTableBody');
@@ -1348,51 +1798,28 @@ function renderTable() {
 
     emptyState.style.display = 'none';
 
-    // Master Admin Panel - Always has full privileges
-    const isMasterAdmin = true;
-
     const html = filteredLocations.map(location => {
-        const urgencyColor = getUrgencyColor(location.urgencyLevel);
-        const urgencyText = location.urgencyLevel.charAt(0).toUpperCase() + location.urgencyLevel.slice(1);
+        const urgencyLevel = String(location.urgencyLevel || 'moderate').toLowerCase();
+        const urgencyColor = getUrgencyColor(urgencyLevel);
+        const urgencyText = urgencyLevel.charAt(0).toUpperCase() + urgencyLevel.slice(1);
         const date = new Date(location.reportedAt).toLocaleString();
-        const reliefNeeds = location.reliefNeeds.join(', ');
+        const reliefNeeds = Array.isArray(location.reliefNeeds) ? location.reliefNeeds.join(', ') : 'N/A';
         const reporter = location.reporterName || 'Anonymous';
         const isReached = location.reached || false;
+        const latitude = Array.isArray(location.coords) ? Number(location.coords[0]) : Number.NaN;
+        const longitude = Array.isArray(location.coords) ? Number(location.coords[1]) : Number.NaN;
+        const coordsLabel = Number.isFinite(latitude) && Number.isFinite(longitude)
+            ? `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`
+            : 'Unknown coordinates';
 
-        // Different actions for master admin vs regular users
-        const actionButtons = isMasterAdmin ? `
-            <button class="btn-icon btn-info" onclick="viewDetails('${location.firestoreId}')" title="View Details">
-                <i class="fas fa-eye"></i>
-            </button>
-            <label class="checkbox-container" title="${isReached ? 'Mark as not reached' : 'Mark as reached'}">
-                <input type="checkbox" 
-                       ${isReached ? 'checked' : ''} 
-                       onchange="toggleReached('${location.firestoreId}', this.checked)">
-                <span class="checkmark"></span>
-                <span class="checkbox-label">${isReached ? 'Reached' : 'Mark Reached'}</span>
-            </label>
-            <button class="btn-icon btn-danger" onclick="showDeleteModal('${location.firestoreId}')" title="Delete">
-                <i class="fas fa-trash"></i>
-            </button>
-        ` : `
-            <button class="btn-icon btn-info" onclick="viewDetails('${location.firestoreId}')" title="View Details">
-                <i class="fas fa-eye"></i>
-            </button>
-            <label class="checkbox-container" title="${isReached ? 'Mark as not reached' : 'Mark as reached'}">
-                <input type="checkbox" 
-                       ${isReached ? 'checked' : ''} 
-                       onchange="toggleReached('${location.firestoreId}', this.checked)">
-                <span class="checkmark"></span>
-                <span class="checkbox-label">${isReached ? 'Reached' : 'Mark Reached'}</span>
-            </label>
-        `;
+        const actionButtons = buildRowActionsMenu(location, 'pins');
 
         return `
             <tr data-id="${location.firestoreId}" class="${isReached ? 'reached-location' : ''}">
                 <td>
-                    <strong>${escapeHtml(location.name)}</strong>
+                    <strong>${escapeHtml(String(location.name || 'Unknown location'))}</strong>
                     <br>
-                    <small class="text-muted">${location.coords[0].toFixed(4)}, ${location.coords[1].toFixed(4)}</small>
+                    <small class="text-muted">${coordsLabel}</small>
                     ${isReached ? `<br><span class="reached-badge"><i class="fas fa-check-circle"></i> Reached${location.reachedByTeam ? ' by ' + escapeHtml(location.reachedByTeam) : ''}</span>` : ''}
                 </td>
                 <td>
@@ -1401,12 +1828,12 @@ function renderTable() {
                     </span>
                 </td>
                 <td>
-                    <span class="source-badge">${escapeHtml(location.source.toUpperCase())}</span>
+                    <span class="source-badge">${escapeHtml(String(location.source || 'unknown').toUpperCase())}</span>
                 </td>
                 <td>
                     <div class="relief-needs-cell">${escapeHtml(reliefNeeds)}</div>
                 </td>
-                <td>${escapeHtml(reporter)}</td>
+                <td>${escapeHtml(String(reporter))}</td>
                 <td>
                     <small>${date}</small>
                 </td>
@@ -1418,6 +1845,363 @@ function renderTable() {
     }).join('');
 
     tbody.innerHTML = html;
+}
+
+function getLocationResponseStatus(location) {
+    if (!location || typeof location !== 'object') {
+        return {
+            isReached: false,
+            isProofSubmitted: false,
+            isOnTheWay: false,
+            status: 'unreached',
+            statusLabel: 'Unreached',
+            respondingName: '',
+            updatedAt: null
+        };
+    }
+
+    const isReached = location.reached === true;
+    const respondingName = [
+        location.donorResponding,
+        location.respondingTeam,
+        location.responseTeam,
+        location.reachedByTeam,
+        location.supportedByName,
+        location.supporterName
+    ]
+        .map(value => (value || '').toString().trim())
+        .find(value => value) || '';
+
+    const responseStatusValue = (location.responseStatus || location.reliefStatus || '').toString().toLowerCase();
+    const supportStatusValue = (location.supportStatus || location.support_status || '').toString().toLowerCase();
+    const hasPendingProof = Array.isArray(donationLogs) && donationLogs.some((log) => (
+        normalizeDonationStatus(log.verificationStatus) === 'pending' &&
+        donationLogBelongsToLocation(log, location)
+    ));
+    const isProofSubmitted = !isReached && (
+        hasPendingProof ||
+        supportStatusValue.includes('proof submitted') ||
+        supportStatusValue.includes('proof_submitted') ||
+        responseStatusValue.includes('proof submitted') ||
+        responseStatusValue.includes('proof_submitted') ||
+        location.proofVerificationStatus === 'pending' ||
+        Boolean(location.proofSubmittedAt)
+    );
+    const isOnTheWay = !isReached && !isProofSubmitted && (
+        location.onTheWay === true ||
+        location.on_the_way === true ||
+        supportStatusValue.includes('on the way') ||
+        supportStatusValue.includes('on_the_way') ||
+        supportStatusValue.includes('on-the-way') ||
+        responseStatusValue.includes('on the way') ||
+        responseStatusValue.includes('on_the_way') ||
+        responseStatusValue.includes('on-the-way') ||
+        responseStatusValue.includes('ontheway') ||
+        responseStatusValue.includes('enroute') ||
+        responseStatusValue.includes('en route') ||
+        Boolean(respondingName)
+    );
+
+    const status = isReached
+        ? 'reached'
+        : (isProofSubmitted ? 'proof-submitted' : (isOnTheWay ? 'on-the-way' : 'unreached'));
+    const statusLabel = isReached
+        ? 'Reached'
+        : (isProofSubmitted ? 'Proof submitted' : (isOnTheWay ? 'On the way' : 'Unreached'));
+    const updatedAt = location.reachedAt ||
+        location.proofSubmittedAt ||
+        location.respondingAt ||
+        location.supportedAt ||
+        location.reportedAt ||
+        null;
+
+    return {
+        isReached,
+        isProofSubmitted,
+        isOnTheWay,
+        status,
+        statusLabel,
+        respondingName,
+        updatedAt
+    };
+}
+
+function formatSupportedUpdatedAt(value) {
+    if (!value) {
+        return 'Unknown';
+    }
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? 'Unknown' : date.toLocaleString();
+}
+
+function renderSupportedLocationsTable() {
+    const tbody = document.getElementById('supportedLocationsBody');
+    const emptyState = document.getElementById('supportedLocationsEmpty');
+
+    if (!tbody || !emptyState) {
+        return;
+    }
+
+    const searchTerm = (document.getElementById('supportedSearch')?.value || '').toLowerCase().trim();
+    const statusFilter = (document.getElementById('supportedStatusFilter')?.value || 'all').toLowerCase();
+    const urgencyFilter = (document.getElementById('supportedUrgencyFilter')?.value || 'all').toLowerCase();
+
+    filteredSupportedLocations = allLocations
+        .map((location) => ({
+            location,
+            statusData: getLocationResponseStatus(location)
+        }))
+        .filter(({ statusData }) => statusData.isOnTheWay || statusData.isProofSubmitted || statusData.isReached)
+        .filter(({ location, statusData }) => {
+            const reliefNeeds = Array.isArray(location.reliefNeeds) ? location.reliefNeeds : [];
+            const matchesSearch = !searchTerm ||
+                String(location.name || '').toLowerCase().includes(searchTerm) ||
+                String(location.source || '').toLowerCase().includes(searchTerm) ||
+                String(location.reporterName || '').toLowerCase().includes(searchTerm) ||
+                String(statusData.respondingName || '').toLowerCase().includes(searchTerm) ||
+                reliefNeeds.some(need => String(need).toLowerCase().includes(searchTerm));
+
+            const matchesStatus = statusFilter === 'all' || statusData.status === statusFilter;
+            const matchesUrgency = urgencyFilter === 'all' || String(location.urgencyLevel || '').toLowerCase() === urgencyFilter;
+            return matchesSearch && matchesStatus && matchesUrgency;
+        })
+        .sort((a, b) => {
+            const statusPriority = { 'proof-submitted': 3, 'on-the-way': 2, reached: 1 };
+            const aPriority = statusPriority[a.statusData.status] || 0;
+            const bPriority = statusPriority[b.statusData.status] || 0;
+            if (aPriority !== bPriority) {
+                return bPriority - aPriority;
+            }
+
+            const aTime = new Date(a.statusData.updatedAt || a.location.reportedAt || 0).getTime();
+            const bTime = new Date(b.statusData.updatedAt || b.location.reportedAt || 0).getTime();
+            return bTime - aTime;
+        });
+
+    if (!filteredSupportedLocations.length) {
+        tbody.innerHTML = '';
+        emptyState.style.display = 'flex';
+        return;
+    }
+
+    emptyState.style.display = 'none';
+
+    tbody.innerHTML = filteredSupportedLocations.map(({ location, statusData }) => {
+        const locationIdentifier = location.firestoreId || location.id || '';
+        const urgencyColor = getUrgencyColor(location.urgencyLevel);
+        const urgencyText = location.urgencyLevel ? location.urgencyLevel.toUpperCase() : 'MODERATE';
+        const responder = statusData.respondingName || 'Unassigned';
+        const latitude = Array.isArray(location.coords) ? Number(location.coords[0]) : Number.NaN;
+        const longitude = Array.isArray(location.coords) ? Number(location.coords[1]) : Number.NaN;
+        const coordsLabel = Number.isFinite(latitude) && Number.isFinite(longitude)
+            ? `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`
+            : 'Unknown coordinates';
+        const updatedAt = formatSupportedUpdatedAt(statusData.updatedAt);
+        const statusBadgeClass = statusData.isReached
+            ? 'supported-status-reached'
+            : (statusData.isProofSubmitted ? 'supported-status-proof-submitted' : 'supported-status-on-the-way');
+        const statusAction = statusData.isProofSubmitted
+            ? `<button class="btn btn-info btn-sm supported-action-btn" onclick="openDonationWorkflowForLocation('${locationIdentifier}')">
+                    <i class="fas fa-clipboard-check"></i> Review Proof
+               </button>`
+            : statusData.isOnTheWay
+                ? `<button class="btn btn-info btn-sm supported-action-btn" onclick="pingSupporterForProof('${locationIdentifier}')">
+                    <i class="fas fa-bell"></i> Ping for Proof
+               </button>`
+            : `<button class="btn btn-secondary btn-sm supported-action-btn" onclick="toggleReached('${locationIdentifier}', false)">
+                    <i class="fas fa-rotate-left"></i> Undo Reached
+               </button>`;
+        const moreActions = buildRowActionsMenu(
+            location.firestoreId ? location : { ...location, firestoreId: locationIdentifier },
+            'supported'
+        );
+
+        return `
+            <tr data-id="${locationIdentifier}" class="${statusData.isReached ? 'reached-location' : ''}">
+                <td>
+                    <strong>${escapeHtml(location.name || 'Unknown location')}</strong>
+                    <br>
+                    <small class="text-muted">${coordsLabel}</small>
+                </td>
+                <td>
+                    <span class="urgency-badge" style="color: ${urgencyColor};">
+                        ${urgencyText}
+                    </span>
+                </td>
+                <td>${escapeHtml(responder)}</td>
+                <td>
+                    <span class="supported-status-badge ${statusBadgeClass}">
+                        ${escapeHtml(statusData.statusLabel)}
+                    </span>
+                </td>
+                <td><small>${escapeHtml(updatedAt)}</small></td>
+                <td class="actions-cell">
+                    <div class="supported-actions-wrap">
+                        ${statusAction}
+                        ${moreActions}
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function showEditLocationError(message) {
+    const errorElement = document.getElementById('editLocationError');
+    if (!errorElement) {
+        return;
+    }
+
+    if (!message) {
+        errorElement.style.display = 'none';
+        errorElement.textContent = '';
+        return;
+    }
+
+    errorElement.textContent = message;
+    errorElement.style.display = 'block';
+}
+
+function openEditLocationModal(firestoreId) {
+    const location = allLocations.find(loc => loc.firestoreId === firestoreId);
+    const modal = document.getElementById('editLocationModal');
+    if (!location || !modal) {
+        return;
+    }
+
+    selectedLocationForEdit = location;
+    closeAllRowActionMenus();
+
+    const nameInput = document.getElementById('editLocationName');
+    const urgencyInput = document.getElementById('editUrgencyLevel');
+    const sourceInput = document.getElementById('editLocationSource');
+    const reliefInput = document.getElementById('editReliefNeeds');
+    const additionalInfoInput = document.getElementById('editAdditionalInfo');
+    const meta = document.getElementById('editLocationMeta');
+
+    if (nameInput) {
+        nameInput.value = location.name || '';
+    }
+    if (urgencyInput) {
+        const normalizedUrgency = String(location.urgencyLevel || '').toLowerCase();
+        urgencyInput.value = ['critical', 'urgent', 'moderate'].includes(normalizedUrgency)
+            ? normalizedUrgency
+            : 'moderate';
+    }
+    if (sourceInput) {
+        sourceInput.value = location.source || '';
+    }
+    if (reliefInput) {
+        reliefInput.value = Array.isArray(location.reliefNeeds) ? location.reliefNeeds.join(', ') : '';
+    }
+    if (additionalInfoInput) {
+        additionalInfoInput.value = location.additionalInfo || '';
+    }
+    if (meta) {
+        meta.textContent = `Document: ${location.firestoreId}`;
+    }
+
+    showEditLocationError('');
+    modal.style.display = 'flex';
+
+    if (nameInput) {
+        nameInput.focus();
+        nameInput.select();
+    }
+}
+
+function closeEditLocationModal() {
+    const modal = document.getElementById('editLocationModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+    selectedLocationForEdit = null;
+    showEditLocationError('');
+}
+
+async function saveEditLocation() {
+    if (!selectedLocationForEdit) {
+        return;
+    }
+
+    const nameInput = document.getElementById('editLocationName');
+    const urgencyInput = document.getElementById('editUrgencyLevel');
+    const sourceInput = document.getElementById('editLocationSource');
+    const reliefInput = document.getElementById('editReliefNeeds');
+    const additionalInfoInput = document.getElementById('editAdditionalInfo');
+    const saveBtn = document.getElementById('saveEditLocation');
+    if (!nameInput || !urgencyInput || !sourceInput || !reliefInput || !additionalInfoInput || !saveBtn) {
+        return;
+    }
+
+    const name = nameInput.value.trim();
+    const urgency = urgencyInput.value;
+    const source = sourceInput.value.trim();
+    const additionalInfo = additionalInfoInput.value.trim();
+    const parsedNeeds = parseReliefNeeds(reliefInput.value || '');
+
+    if (!name) {
+        showEditLocationError('Location name is required.');
+        nameInput.focus();
+        return;
+    }
+    if (!['critical', 'urgent', 'moderate'].includes(urgency)) {
+        showEditLocationError('Select a valid urgency level.');
+        urgencyInput.focus();
+        return;
+    }
+    if (!source) {
+        showEditLocationError('Source is required.');
+        sourceInput.focus();
+        return;
+    }
+    if (!parsedNeeds.length) {
+        showEditLocationError('Add at least one relief need.');
+        reliefInput.focus();
+        return;
+    }
+
+    showEditLocationError('');
+    const originalLabel = saveBtn.innerHTML;
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+
+    try {
+        const { doc, updateDoc } = await import('https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js');
+        const updatedAt = new Date().toISOString();
+        const updatePayload = {
+            name,
+            urgencyLevel: urgency,
+            source,
+            reliefNeeds: parsedNeeds,
+            additionalInfo,
+            updatedAt,
+            updatedBy: currentUser ? currentUser.email : 'master-admin'
+        };
+
+        await updateDoc(doc(db, 'relief-locations', selectedLocationForEdit.firestoreId), updatePayload);
+
+        const targetIndex = allLocations.findIndex(loc => loc.firestoreId === selectedLocationForEdit.firestoreId);
+        if (targetIndex > -1) {
+            allLocations[targetIndex] = {
+                ...allLocations[targetIndex],
+                ...updatePayload
+            };
+        }
+
+        updateStats();
+        applyFilters();
+        renderSupportedLocationsTable();
+        renderDonationLogs();
+        closeEditLocationModal();
+        showSuccess('Location updated successfully.');
+    } catch (error) {
+        console.error('Error updating location:', error);
+        showEditLocationError('Failed to save changes. Please try again.');
+    } finally {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = originalLabel;
+    }
 }
 
 // Get urgency color
@@ -1769,12 +2553,20 @@ function showError(message) {
 
 // Toggle reached status
 async function toggleReached(firestoreId, isReached) {
+    closeAllRowActionMenus();
+    const location = findLocationByAnyId(firestoreId);
+    if (!location) {
+        showError('Location not found.');
+        return;
+    }
+    const targetFirestoreId = location.firestoreId || firestoreId;
+
     // If marking as reached, show team name modal
     if (isReached) {
-        showTeamNameModal(firestoreId);
+        showTeamNameModal(targetFirestoreId);
     } else {
         // Unmarking as reached - proceed directly
-        await updateReachedStatus(firestoreId, false, null);
+        await updateReachedStatus(targetFirestoreId, false, null, {});
     }
 }
 
@@ -1785,10 +2577,45 @@ function showTeamNameModal(firestoreId) {
     const confirmBtn = document.getElementById('confirmTeamName');
     const cancelBtn = document.getElementById('cancelTeamName');
     const closeBtn = document.getElementById('closeTeamModal');
+    const donationModeInput = document.getElementById('teamReachedFlowDonation');
+    const manualModeInput = document.getElementById('teamReachedFlowManual');
+    const manualReasonGroup = document.getElementById('teamManualReasonGroup');
+    const manualReasonInput = document.getElementById('teamManualReasonInput');
+    const locationLabel = document.getElementById('teamLocationLabel');
+    const openDonationFlowBtn = document.getElementById('openDonationWorkflowFromReached');
+    const modalError = document.getElementById('teamModalError');
+    const location = findLocationByAnyId(firestoreId);
+
+    if (!modal || !input || !confirmBtn || !cancelBtn || !closeBtn || !donationModeInput || !manualModeInput || !manualReasonGroup || !manualReasonInput || !locationLabel || !openDonationFlowBtn || !modalError || !location) {
+        showError('Unable to open reached flow modal. Refresh and try again.');
+        return;
+    }
+
+    const setModalError = (message) => {
+        modalError.textContent = message || '';
+        modalError.style.display = message ? 'block' : 'none';
+    };
+
+    const updateReasonVisibility = () => {
+        const isManualMode = manualModeInput.checked;
+        manualReasonGroup.style.display = isManualMode ? 'block' : 'none';
+        if (!isManualMode) {
+            manualReasonInput.value = '';
+        }
+    };
 
     // Pre-fill with saved team name
     const savedTeamName = localStorage.getItem('userTeamName');
     input.value = savedTeamName || (currentUser ? currentUser.displayName : '');
+    input.style.borderColor = '#e0e0e0';
+
+    // Reset flow fields
+    donationModeInput.checked = true;
+    manualModeInput.checked = false;
+    manualReasonInput.value = '';
+    updateReasonVisibility();
+    setModalError('');
+    locationLabel.innerHTML = `<i class="fas fa-map-marker-alt"></i> Selected location: ${escapeHtml(location.name || 'Unknown location')}`;
 
     // Show modal
     modal.style.display = 'flex';
@@ -1800,7 +2627,21 @@ function showTeamNameModal(firestoreId) {
         const teamName = input.value.trim();
         if (!teamName) {
             input.style.borderColor = '#dc3545';
+            setModalError('Team name is required.');
             input.focus();
+            return;
+        }
+        input.style.borderColor = '#e0e0e0';
+
+        const isManualMode = manualModeInput.checked;
+        const manualReason = manualReasonInput.value.trim();
+        if (isManualMode && manualReason.length < 10) {
+            setModalError('Manual mode requires a short reason (at least 10 characters).');
+            manualReasonInput.focus();
+            return;
+        }
+        if (!isManualMode && !hasApprovedDonationProofForLocation(firestoreId)) {
+            setModalError('No approved donation log found for this location. Open Donation Logs workflow first.');
             return;
         }
 
@@ -1809,21 +2650,25 @@ function showTeamNameModal(firestoreId) {
 
         // Close modal
         modal.style.display = 'none';
+        cleanup();
 
         // Update status
-        await updateReachedStatus(firestoreId, true, teamName);
-
-        // Cleanup
-        cleanup();
+        await updateReachedStatus(firestoreId, true, teamName, {
+            verificationMode: isManualMode ? 'manual' : 'donation-log',
+            manualReason: isManualMode ? manualReason : null
+        });
     };
 
     // Handle cancel
     const handleCancel = () => {
         modal.style.display = 'none';
-        // Uncheck the checkbox
-        const checkbox = document.querySelector(`input[onchange*="${firestoreId}"]`);
-        if (checkbox) checkbox.checked = false;
         cleanup();
+    };
+
+    const handleOpenDonationFlow = () => {
+        modal.style.display = 'none';
+        cleanup();
+        openDonationWorkflowForLocation(firestoreId);
     };
 
     // Cleanup event listeners
@@ -1832,13 +2677,21 @@ function showTeamNameModal(firestoreId) {
         cancelBtn.removeEventListener('click', handleCancel);
         closeBtn.removeEventListener('click', handleCancel);
         input.removeEventListener('keypress', handleEnter);
+        donationModeInput.removeEventListener('change', handleFlowChange);
+        manualModeInput.removeEventListener('change', handleFlowChange);
+        openDonationFlowBtn.removeEventListener('click', handleOpenDonationFlow);
     };
 
     // Handle Enter key
     const handleEnter = (e) => {
-        if (e.key === 'Enter') {
+        if (e.key === 'Enter' && e.target !== manualReasonInput) {
             handleConfirm();
         }
+    };
+
+    const handleFlowChange = () => {
+        updateReasonVisibility();
+        setModalError('');
     };
 
     // Add event listeners
@@ -1846,27 +2699,52 @@ function showTeamNameModal(firestoreId) {
     cancelBtn.addEventListener('click', handleCancel);
     closeBtn.addEventListener('click', handleCancel);
     input.addEventListener('keypress', handleEnter);
+    donationModeInput.addEventListener('change', handleFlowChange);
+    manualModeInput.addEventListener('change', handleFlowChange);
+    openDonationFlowBtn.addEventListener('click', handleOpenDonationFlow);
 }
 
 // Update reached status in Firestore
-async function updateReachedStatus(firestoreId, isReached, teamName) {
+async function updateReachedStatus(firestoreId, isReached, teamName, options = {}) {
     try {
         const { doc, updateDoc } = await import('https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js');
+        const reachedAt = isReached ? new Date().toISOString() : null;
+        const reachedBy = isReached ? (currentUser ? currentUser.email : 'Unknown') : null;
+        const reachedByTeam = isReached ? teamName : null;
+        const reachedVerificationMode = isReached ? (options.verificationMode || null) : null;
+        const reachedManualReason = isReached && reachedVerificationMode === 'manual'
+            ? (options.manualReason || null)
+            : null;
 
         await updateDoc(doc(db, 'relief-locations', firestoreId), {
             reached: isReached,
-            reachedAt: isReached ? new Date().toISOString() : null,
-            reachedBy: isReached ? (currentUser ? currentUser.email : 'Unknown') : null,
-            reachedByTeam: isReached ? teamName : null
+            reachedAt,
+            reachedBy,
+            reachedByTeam,
+            reachedVerificationMode,
+            reachedManualReason
         });
 
+        const targetLocation = allLocations.find(location => location.firestoreId === firestoreId);
+        if (targetLocation) {
+            targetLocation.reached = isReached;
+            targetLocation.reachedAt = reachedAt;
+            targetLocation.reachedBy = reachedBy;
+            targetLocation.reachedByTeam = reachedByTeam;
+            targetLocation.reachedVerificationMode = reachedVerificationMode;
+            targetLocation.reachedManualReason = reachedManualReason;
+            updateStats();
+            applyFilters();
+            renderSupportedLocationsTable();
+            renderDonationLogs();
+        }
+
         const message = isReached
-            ? `✅ Location marked as reached by ${teamName}`
+            ? ('Location marked as reached by ' + teamName)
             : 'Location marked as not reached';
         showSuccess(message);
 
-        console.log(`Location ${firestoreId} marked as ${isReached ? 'reached' : 'not reached'}${isReached ? ' by ' + teamName : ''}`);
-
+        console.log('Location ' + firestoreId + ' marked as ' + (isReached ? 'reached' : 'not reached') + (isReached ? (' by ' + teamName) : ''));
     } catch (error) {
         console.error('Error updating reached status:', error);
         showError('Failed to update status. Please try again.');
@@ -2501,5 +3379,3 @@ window.viewDetails = viewDetails;
 window.toggleReached = toggleReached;
 window.viewDonationLog = viewDonationLog;
 
-// Initialize when DOM is ready
-document.addEventListener('DOMContentLoaded', initAdmin);

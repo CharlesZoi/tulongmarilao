@@ -1,4 +1,4 @@
-const CACHE_VERSION = '2026-02-17-01';
+const CACHE_VERSION = '2026-02-18-02';
 const CACHE_NAME = `marilao-relief-map-${CACHE_VERSION}`;
 const urlsToCache = [
   './',
@@ -53,16 +53,24 @@ self.addEventListener('activate', (event) => {
 // Fetch event - serve from cache, fallback to network
 self.addEventListener('fetch', (event) => {
   const { request } = event;
+  const offlineFallback = new Response('', {
+    status: 503,
+    statusText: 'Offline'
+  });
 
   // Skip Firebase and external API requests - always fetch from network
   if (
     request.url.includes('firestore.googleapis.com') ||
     request.url.includes('firebase') ||
     request.url.includes('googleapis.com') ||
+    request.url.includes('openstreetmap.de') ||
+    request.url.includes('openstreetmap.org') ||
     request.url.includes('gstatic.com') ||
     request.method !== 'GET'
   ) {
-    event.respondWith(fetch(request));
+    event.respondWith(
+      fetch(request).catch(() => caches.match(request).then((cached) => cached || offlineFallback))
+    );
     return;
   }
 
@@ -91,7 +99,7 @@ self.addEventListener('fetch', (event) => {
           }
           return networkResponse;
         })
-        .catch(() => cached);
+        .catch(() => cached || offlineFallback);
 
       return cached || networkFetch;
     })

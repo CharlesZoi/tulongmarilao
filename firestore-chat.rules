@@ -9,6 +9,28 @@ service cloud.firestore {
              ];
     }
 
+    function hasDonationIdentity(data) {
+      return data.createdBy is string ||
+             data.userId is string ||
+             data.donorId is string;
+    }
+
+    function donationIdentityMatchesAuth(data) {
+      return data.createdBy == request.auth.uid ||
+             data.userId == request.auth.uid ||
+             data.donorId == request.auth.uid;
+    }
+
+    function hasDonationLocationId(data) {
+      return data.locationId is string ||
+             (data.location is map && data.location.id is string);
+    }
+
+    function hasDonationSubmittedAt(data) {
+      return data.submittedAt is timestamp ||
+             data.submittedAt is string;
+    }
+
     match /relief-locations/{locationId} {
       allow read: if true;
 
@@ -59,6 +81,40 @@ service cloud.firestore {
          resource.data.userType == 'Reporter');
 
       allow update: if false;
+    }
+
+    match /donation-logs/{logId} {
+      allow read: if true;
+
+      allow create: if (
+        (request.auth != null &&
+          hasDonationIdentity(request.resource.data) &&
+          donationIdentityMatchesAuth(request.resource.data)) ||
+        (request.auth == null &&
+          hasDonationIdentity(request.resource.data))
+      ) &&
+        hasDonationLocationId(request.resource.data) &&
+        hasDonationSubmittedAt(request.resource.data);
+
+      allow update: if isMasterAdmin() ||
+        (request.auth != null &&
+          (resource.data.createdBy == request.auth.uid ||
+           resource.data.userId == request.auth.uid ||
+           resource.data.donorId == request.auth.uid)) ||
+        (request.auth == null &&
+          (resource.data.createdBy is string ||
+           resource.data.userId is string ||
+           resource.data.donorId is string));
+
+      allow delete: if isMasterAdmin() ||
+        (request.auth != null &&
+          (resource.data.createdBy == request.auth.uid ||
+           resource.data.userId == request.auth.uid ||
+           resource.data.donorId == request.auth.uid)) ||
+        (request.auth == null &&
+          (resource.data.createdBy is string ||
+           resource.data.userId is string ||
+           resource.data.donorId is string));
     }
   }
 }

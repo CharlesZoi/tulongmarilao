@@ -421,7 +421,7 @@ body:has(.admin-dashboard) {
     background: white;
     border-radius: 12px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-    overflow: hidden;
+    overflow: visible;
 }
 
 .pins-table {
@@ -515,6 +515,8 @@ body:has(.admin-dashboard) {
 
 .actions-cell {
     white-space: nowrap;
+    position: relative;
+    overflow: visible;
 }
 
 .status-badge {
@@ -542,6 +544,209 @@ body:has(.admin-dashboard) {
 .status-badge.status-rejected {
     background: #f8d7da;
     color: #b02a37;
+}
+
+.supported-status-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.35rem 0.75rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+
+.supported-status-badge.supported-status-on-the-way {
+    background: #dbeafe;
+    color: #1d4ed8;
+}
+
+.supported-status-badge.supported-status-proof-submitted {
+    background: #ede9fe;
+    color: #6d28d9;
+}
+
+.supported-status-badge.supported-status-reached {
+    background: #d4edda;
+    color: #1e7e34;
+}
+
+.delivery-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.35rem 0.75rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.35px;
+}
+
+.delivery-badge.delivery-on-the-way {
+    background: #dbeafe;
+    color: #1d4ed8;
+}
+
+.delivery-badge.delivery-proof-submitted {
+    background: #ede9fe;
+    color: #6d28d9;
+}
+
+.delivery-badge.delivery-reached {
+    background: #d4edda;
+    color: #1e7e34;
+}
+
+.delivery-badge.delivery-pending {
+    background: #fff3cd;
+    color: #92400e;
+}
+
+.supported-table .actions-cell {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.supported-actions-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.supported-action-btn {
+    min-height: 34px;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.row-actions-menu {
+    position: relative;
+    display: inline-flex;
+}
+
+.row-actions-trigger {
+    color: #334155;
+    background: #eef2f7;
+}
+
+.row-actions-trigger:hover {
+    color: #0f172a;
+    background: #dbe3ee;
+}
+
+.row-actions-dropdown {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    min-width: 190px;
+    background: #ffffff;
+    border: 1px solid #dbe3ee;
+    border-radius: 10px;
+    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.16);
+    padding: 0.35rem;
+    display: none;
+    z-index: 200;
+}
+
+.row-actions-dropdown.is-open {
+    display: flex !important;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 2px;
+}
+
+.row-actions-item {
+    width: 100%;
+    border: none;
+    background: transparent;
+    color: #334155;
+    font-size: 0.85rem;
+    border-radius: 8px;
+    padding: 0.55rem 0.65rem;
+    text-align: left;
+    display: flex !important;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0.55rem;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.row-actions-item i {
+    width: 14px;
+}
+
+.row-actions-item:hover {
+    background: #f1f5f9;
+}
+
+.row-actions-item.is-danger {
+    color: #b91c1c;
+}
+
+.row-actions-item.is-danger:hover {
+    background: #fee2e2;
+}
+
+.team-flow-modal .modal-body {
+    display: grid;
+    gap: 0.8rem;
+}
+
+.team-location-label {
+    margin: 0;
+    color: #0f172a;
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+.team-reached-flow {
+    display: grid;
+    gap: 0.55rem;
+}
+
+.team-flow-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    padding: 0.65rem 0.75rem;
+    border: 1px solid #dbe3ee;
+    border-radius: 8px;
+    cursor: pointer;
+    background: #f8fafc;
+}
+
+.team-flow-option input[type="radio"] {
+    margin-top: 0.15rem;
+}
+
+.team-flow-option strong {
+    display: block;
+    color: #0f172a;
+    font-size: 0.86rem;
+}
+
+.team-flow-option small {
+    color: #64748b;
+    font-size: 0.77rem;
+}
+
+.team-flow-actions {
+    display: flex;
+    justify-content: flex-start;
+}
+
+.team-modal-error {
+    margin: 0;
+    color: #b91c1c;
+    font-size: 0.82rem;
+    font-weight: 600;
 }
 
 .donation-photo-grid {

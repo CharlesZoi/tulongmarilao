@@ -111,6 +111,11 @@
                 </div>
             </div>
 
+            <button type="button" id="viewDonationsPanelBtn" class="view-donations-panel-btn">
+                <i class="fas fa-list-check"></i>
+                <span>Donations Log</span>
+            </button>
+
         </div>
 
         <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -130,6 +135,9 @@
                     </button>
                     <button type="button" class="sidebar-action" id="sidebarLogDonation">
                         <i class="fas fa-hand-holding-heart"></i> Log Donations
+                    </button>
+                    <button type="button" class="sidebar-action" id="sidebarDonationTransparency">
+                        <i class="fas fa-list-check"></i> Donation Transparency
                     </button>
                     <a href="user-dashboard.html" class="sidebar-action" id="sidebarActivityLogs">
                         <i class="fas fa-clipboard-list"></i> My Activity Dashboard
@@ -416,6 +424,66 @@
                 <div id="activityLogList" class="activity-log-list"></div>
                 <p id="activityLogEmpty" class="activity-log-empty">No reported locations yet. Use "Report Location" to
                     add one.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Donations Log Right Panel -->
+    <div id="donationLogsPanelModal" class="modal donation-modal donation-logs-modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-header-content">
+                    <h3><i class="fas fa-list-check"></i> Donations Log</h3>
+                    <p class="modal-subtitle">Your own donation submissions and verification updates.</p>
+                </div>
+                <button id="closeDonationLogsPanelModal" class="close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="donationLogsPanelList" class="donation-logs-panel-list"></div>
+                <p id="donationLogsPanelEmpty" class="donation-transparency-empty">You have no donation logs yet.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Donation Transparency Modal -->
+    <div id="donationTransparencyModal" class="modal donation-transparency-overview-modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-header-content">
+                    <h3><i class="fas fa-chart-line"></i> Donation Transparency</h3>
+                    <p class="modal-subtitle">Verified and successful donation records for public audit tracking.</p>
+                </div>
+                <button id="closeDonationTransparencyModal" class="close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="donation-transparency-toolbar">
+                    <div class="donation-transparency-search">
+                        <i class="fas fa-search"></i>
+                        <input type="text" id="donationTransparencySearchInput"
+                            placeholder="Search by donor name, items, address, status...">
+                    </div>
+                    <p id="donationTransparencyCountLabel" class="donation-transparency-count-label">Showing 0 of 0
+                        verified donations</p>
+                </div>
+
+                <div class="donation-transparency-table-wrap">
+                    <table class="donation-transparency-table">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Donor Name</th>
+                                <th>Contact</th>
+                                <th>Donated Items</th>
+                                <th>Donation Address</th>
+                                <th>Donation Date</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="donationTransparencyList"></tbody>
+                    </table>
+                </div>
+                <div id="donationTransparencyPagination" class="donation-transparency-pagination"></div>
+                <p id="donationTransparencyEmpty" class="donation-transparency-empty">No verified donation logs yet.</p>
             </div>
         </div>
     </div>

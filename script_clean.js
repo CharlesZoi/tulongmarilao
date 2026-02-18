@@ -1018,6 +1018,14 @@ let privacyConsented = false;
 // Firebase Firestore functions
 let db = null;
 let unsubscribeListener = null;
+let unsubscribeDonationLogsListener = null;
+let donationTransparencyLogs = [];
+let donationTransparencyCurrentPage = 1;
+let approvedDonationLocationIds = new Set();
+let approvedDonationInfoByLocationId = new Map();
+let pendingDonationLocationIds = new Set();
+let pendingDonationInfoByLocationId = new Map();
+const DONATION_TRANSPARENCY_PAGE_SIZE = 20;
 
 // Initialize Firebase connection
 function initFirebase() {
@@ -1097,6 +1105,254 @@ function resolveDonationActorId(candidateId = '') {
         localStorage.setItem('localUserId', localId);
     }
     return localId;
+}
+
+function getLocationIdentifier(location) {
+    if (!location || typeof location !== 'object') {
+        return '';
+    }
+
+    const candidates = [
+        location.firestoreId,
+        location.id,
+        location.locationId,
+        location.reportId
+    ];
+
+    const matched = candidates.find(value => typeof value === 'string' && value.trim());
+    return matched ? matched.trim() : '';
+}
+
+function getDonationLogLocationId(donationLog) {
+    if (!donationLog || typeof donationLog !== 'object') {
+        return '';
+    }
+
+    const nestedLocation = donationLog.location && typeof donationLog.location === 'object'
+        ? donationLog.location
+        : {};
+
+    const candidates = [
+        donationLog.locationId,
+        nestedLocation.id
+    ];
+
+    const matched = candidates.find(value => typeof value === 'string' && value.trim());
+    return matched ? matched.trim() : '';
+}
+
+function normalizeDonationVerificationStatus(donationLog) {
+    if (!donationLog || typeof donationLog !== 'object') {
+        return 'pending';
+    }
+
+    const statusValue = [
+        donationLog.verificationStatus,
+        donationLog.verification_status,
+        donationLog.status
+    ]
+        .map(value => (value || '').toString().toLowerCase().trim())
+        .find(value => value) || '';
+
+    if (statusValue.includes('approve') || statusValue.includes('verified') || statusValue.includes('accept')) {
+        return 'approved';
+    }
+
+    if (statusValue.includes('reject') || statusValue.includes('declin') || statusValue.includes('deny')) {
+        return 'rejected';
+    }
+
+    return statusValue || 'pending';
+}
+
+function isDonationLogVerifiedByAdmin(donationLog) {
+    return normalizeDonationVerificationStatus(donationLog) === 'approved';
+}
+
+function getDateValueMs(value) {
+    if (!value) {
+        return 0;
+    }
+
+    let dateValue = null;
+    if (value && typeof value.toDate === 'function') {
+        dateValue = value.toDate();
+    } else {
+        dateValue = new Date(value);
+    }
+
+    const timestamp = dateValue instanceof Date ? dateValue.getTime() : Number.NaN;
+    return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function getDonationLogSortMs(donationLog) {
+    if (!donationLog || typeof donationLog !== 'object') {
+        return 0;
+    }
+
+    return Math.max(
+        getDateValueMs(donationLog.verifiedAt),
+        getDateValueMs(donationLog.submittedAt),
+        getDateValueMs(donationLog.submittedAtIso)
+    );
+}
+
+function syncApprovedDonationLocationState() {
+    const approvedLocationIds = new Set();
+    const approvedLocationInfo = new Map();
+    const pendingLocationIds = new Set();
+    const pendingLocationInfo = new Map();
+
+    const sortedLogs = donationTransparencyLogs
+        .slice()
+        .sort((a, b) => getDonationLogSortMs(b) - getDonationLogSortMs(a));
+
+    const approvedLogs = sortedLogs
+        .filter(isDonationLogVerifiedByAdmin)
+        .slice()
+        .sort((a, b) => getDonationLogSortMs(b) - getDonationLogSortMs(a));
+
+    approvedLogs.forEach((log) => {
+        const locationId = getDonationLogLocationId(log);
+        if (!locationId) {
+            return;
+        }
+
+        approvedLocationIds.add(locationId);
+
+        if (!approvedLocationInfo.has(locationId)) {
+            approvedLocationInfo.set(locationId, {
+                verifiedAt: log.verifiedAt || null,
+                verifiedBy: log.verifiedBy || '',
+                donorName: log.donorName || '',
+                locationName: log.location && log.location.name ? log.location.name : '',
+                status: normalizeDonationVerificationStatus(log),
+                firestoreId: log.firestoreId || ''
+            });
+        }
+    });
+
+    sortedLogs.forEach((log) => {
+        const locationId = getDonationLogLocationId(log);
+        if (!locationId) {
+            return;
+        }
+
+        if (normalizeDonationVerificationStatus(log) !== 'pending') {
+            return;
+        }
+
+        pendingLocationIds.add(locationId);
+
+        if (!pendingLocationInfo.has(locationId)) {
+            pendingLocationInfo.set(locationId, {
+                submittedAt: log.submittedAt || log.submittedAtIso || null,
+                donorName: log.donorName || '',
+                donorId: log.donorId || log.createdBy || log.userId || '',
+                firestoreId: log.firestoreId || ''
+            });
+        }
+    });
+
+    approvedDonationLocationIds = approvedLocationIds;
+    approvedDonationInfoByLocationId = approvedLocationInfo;
+    pendingDonationLocationIds = pendingLocationIds;
+    pendingDonationInfoByLocationId = pendingLocationInfo;
+}
+
+function getDonationLogCoordinates(donationLog) {
+    if (!donationLog || typeof donationLog !== 'object') {
+        return null;
+    }
+
+    const location = donationLog.location && typeof donationLog.location === 'object'
+        ? donationLog.location
+        : null;
+    const coords = location && Array.isArray(location.coords) ? location.coords : null;
+    if (!coords || coords.length !== 2) {
+        return null;
+    }
+
+    const latitude = Number(coords[0]);
+    const longitude = Number(coords[1]);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+        return null;
+    }
+
+    return [latitude, longitude];
+}
+
+function buildVerifiedDonationVirtualLocations(baseLocations = []) {
+    if (!Array.isArray(baseLocations)) {
+        return [];
+    }
+
+    const existingLocationIds = new Set(
+        baseLocations
+            .map(location => getLocationIdentifier(location))
+            .filter(Boolean)
+    );
+    const seenVirtualIds = new Set();
+    const virtualLocations = [];
+
+    donationTransparencyLogs
+        .filter(isDonationLogVerifiedByAdmin)
+        .slice()
+        .sort((a, b) => getDonationLogSortMs(b) - getDonationLogSortMs(a))
+        .forEach((log) => {
+            const locationId = getDonationLogLocationId(log);
+            if (locationId && existingLocationIds.has(locationId)) {
+                return;
+            }
+
+            const coords = getDonationLogCoordinates(log);
+            if (!coords) {
+                return;
+            }
+
+            const virtualId = locationId || `verified_${log.firestoreId || Date.now()}`;
+            if (seenVirtualIds.has(virtualId)) {
+                return;
+            }
+            seenVirtualIds.add(virtualId);
+
+            const itemNames = Array.isArray(log.items)
+                ? log.items
+                    .map(item => item && item.name ? String(item.name).trim() : '')
+                    .filter(Boolean)
+                    .slice(0, 4)
+                : [];
+
+            virtualLocations.push({
+                id: virtualId,
+                locationId: virtualId,
+                name: (log.location && log.location.name) || 'Verified donation drop-off',
+                locationName: (log.location && log.location.name) || 'Verified donation drop-off',
+                coords,
+                urgency: 'moderate',
+                urgencyLevel: 'moderate',
+                source: 'donation-log',
+                reliefNeeds: itemNames.length ? itemNames : ['Donation delivered'],
+                additionalInfo: log.notes || 'Admin-verified donation delivery.',
+                reached: true,
+                responseStatus: 'reached',
+                reachedByTeam: log.verifiedBy || 'Master admin',
+                reachedAt: log.verifiedAt || null,
+                reportedAt: log.submittedAtIso || log.submittedAt || log.verifiedAt || new Date().toISOString(),
+                donorName: log.donorName || 'Anonymous',
+                donorType: log.donorType || 'individual',
+                donationLogId: log.firestoreId || '',
+                donationVirtual: true
+            });
+        });
+
+    return virtualLocations;
+}
+
+function getAllLocationsForDisplay() {
+    const baseLocations = Array.isArray(userReportedLocations) ? userReportedLocations : [];
+    const virtualLocations = buildVerifiedDonationVirtualLocations(baseLocations);
+    return [...baseLocations, ...virtualLocations];
 }
 
 function normalizeDonationLogPayload(donationLog) {
@@ -1239,6 +1495,56 @@ async function saveDonationLogToFirestore(donationLog) {
 
     const docRef = await addDoc(collection(db, 'donation-logs'), payloadToSave);
     return docRef.id;
+}
+
+async function markLocationDonationProofSubmitted(locationId, donationLog) {
+    if (!locationId) {
+        return;
+    }
+
+    const locationIndex = userReportedLocations.findIndex((location) => (
+        getLocationIdentifier(location) === locationId
+    ));
+
+    if (locationIndex === -1) {
+        return;
+    }
+
+    const existingLocation = userReportedLocations[locationIndex];
+    const submittedAt = donationLog && donationLog.submittedAtIso
+        ? donationLog.submittedAtIso
+        : new Date().toISOString();
+    const submitterName = (donationLog && donationLog.donorName) || existingLocation.supportedByName || 'Anonymous';
+    const updatePayload = {
+        onTheWay: true,
+        on_the_way: true,
+        reached: false,
+        supportStatus: 'proof_submitted',
+        responseStatus: 'proof submitted',
+        proofSubmittedAt: submittedAt,
+        proofSubmittedBy: submitterName,
+        proofVerificationStatus: 'pending',
+        proofVerifiedAt: null,
+        proofVerifiedBy: null
+    };
+
+    if (existingLocation.firestoreId && db) {
+        try {
+            const { doc, updateDoc } = await import('https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js');
+            await updateDoc(doc(db, 'relief-locations', existingLocation.firestoreId), updatePayload);
+        } catch (error) {
+            console.warn('Failed to update location proof status in Firestore:', error);
+        }
+    }
+
+    userReportedLocations[locationIndex] = {
+        ...existingLocation,
+        ...updatePayload
+    };
+
+    localStorage.setItem('userReportedLocations', JSON.stringify(userReportedLocations));
+    refreshMapMarkers();
+    updatePinnedLocationsList();
 }
 
 async function addMarilaoBoundaryLayer() {
@@ -1607,6 +1913,47 @@ async function setupRealtimeListener() {
     }
 }
 
+async function setupDonationLogsListener() {
+    if (!db) {
+        return;
+    }
+
+    try {
+        const { onSnapshot, collection } = await import('https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js');
+
+        if (typeof unsubscribeDonationLogsListener === 'function') {
+            unsubscribeDonationLogsListener();
+        }
+
+        unsubscribeDonationLogsListener = onSnapshot(
+            collection(db, 'donation-logs'),
+            (snapshot) => {
+                const nextLogs = [];
+
+                snapshot.forEach((docSnapshot) => {
+                    const data = docSnapshot.data() || {};
+                    nextLogs.push({
+                        ...data,
+                        firestoreId: docSnapshot.id
+                    });
+                });
+
+                donationTransparencyLogs = nextLogs;
+                syncApprovedDonationLocationState();
+                renderDonationLogsPanelList();
+                renderDonationTransparencyList();
+                refreshMapMarkers();
+                updatePinnedLocationsList();
+            },
+            (error) => {
+                console.error('Error listening to donation logs:', error);
+            }
+        );
+    } catch (error) {
+        console.error('Error setting up donation log listener:', error);
+    }
+}
+
 // Debounced list update
 const debouncedListUpdate = debounce(() => {
     updatePinnedLocationsList();
@@ -1859,6 +2206,7 @@ async function initMap() {
 
     // Set up real-time listener for new locations
     setupRealtimeListener();
+    setupDonationLogsListener();
 
     // Set up event listeners
     setupEventListeners();
@@ -2199,14 +2547,24 @@ function setupEventListeners() {
     }
 
     const sidebarToggle = document.getElementById('sidebarToggle');
+    const viewDonationsPanelBtn = document.getElementById('viewDonationsPanelBtn');
     const sidebarPanel = document.getElementById('sidebarPanel');
     const sidebarOverlay = document.getElementById('sidebarOverlay');
     const sidebarClose = document.getElementById('sidebarClose');
     const sidebarReportLocation = document.getElementById('sidebarReportLocation');
     const sidebarSupportLocation = document.getElementById('sidebarSupportLocation');
     const sidebarLogDonation = document.getElementById('sidebarLogDonation');
+    const sidebarDonationTransparency = document.getElementById('sidebarDonationTransparency');
     // Activity Logs is now a direct link to user-dashboard.html
     const activityLogModal = document.getElementById('activityLogModal');
+    const donationLogsPanelModal = document.getElementById('donationLogsPanelModal');
+    const donationLogsPanelList = document.getElementById('donationLogsPanelList');
+    const closeDonationLogsPanelModalBtn = document.getElementById('closeDonationLogsPanelModal');
+    const donationTransparencyModal = document.getElementById('donationTransparencyModal');
+    const donationTransparencyList = document.getElementById('donationTransparencyList');
+    const donationTransparencyPagination = document.getElementById('donationTransparencyPagination');
+    const donationTransparencySearchInput = document.getElementById('donationTransparencySearchInput');
+    const closeDonationTransparencyModalBtn = document.getElementById('closeDonationTransparencyModal');
     const closeActivityLogModalBtn = document.getElementById('closeActivityLogModal');
     const reachedViewToggle = document.getElementById('reachedViewToggle');
     const unreachedSearch = document.getElementById('unreachedSearch');
@@ -2263,6 +2621,10 @@ function setupEventListeners() {
         });
     }
 
+    if (viewDonationsPanelBtn) {
+        viewDonationsPanelBtn.addEventListener('click', toggleDonationLogsPanel);
+    }
+
     if (sidebarClose) {
         sidebarClose.addEventListener('click', closeSidebar);
     }
@@ -2292,6 +2654,14 @@ function setupEventListeners() {
         });
     }
 
+    if (sidebarDonationTransparency) {
+        sidebarDonationTransparency.addEventListener('click', () => {
+            closeSidebar();
+            closeDonationLogsPanel();
+            openDonationTransparencyModal();
+        });
+    }
+
     // Activity Logs is now a direct link to user-dashboard.html
 
     if (closeActivityLogModalBtn) {
@@ -2303,6 +2673,70 @@ function setupEventListeners() {
             if (event.target.id === 'activityLogModal') {
                 closeActivityLogModal();
             }
+        });
+    }
+
+    if (closeDonationLogsPanelModalBtn) {
+        closeDonationLogsPanelModalBtn.addEventListener('click', closeDonationLogsPanel);
+    }
+
+    if (donationLogsPanelModal) {
+        donationLogsPanelModal.addEventListener('click', (event) => {
+            if (event.target.id === 'donationLogsPanelModal') {
+                closeDonationLogsPanel();
+            }
+        });
+    }
+
+    if (closeDonationTransparencyModalBtn) {
+        closeDonationTransparencyModalBtn.addEventListener('click', closeDonationTransparencyModal);
+    }
+
+    if (donationTransparencyModal) {
+        donationTransparencyModal.addEventListener('click', (event) => {
+            if (event.target.id === 'donationTransparencyModal') {
+                closeDonationTransparencyModal();
+            }
+        });
+    }
+
+    if (donationLogsPanelList) {
+        donationLogsPanelList.addEventListener('click', (event) => {
+            const viewMapBtn = event.target.closest('.donation-log-view-map');
+            if (!viewMapBtn) {
+                return;
+            }
+
+            const logId = viewMapBtn.dataset.logId ? viewMapBtn.dataset.logId.trim() : '';
+            if (!logId) {
+                return;
+            }
+
+            focusDonationLogOnMap(logId);
+        });
+    }
+
+    if (donationTransparencyPagination) {
+        donationTransparencyPagination.addEventListener('click', (event) => {
+            const pageBtn = event.target.closest('.donation-transparency-page-btn');
+            if (!pageBtn || pageBtn.disabled) {
+                return;
+            }
+
+            const nextPage = Number(pageBtn.dataset.page);
+            if (!Number.isFinite(nextPage) || nextPage < 1) {
+                return;
+            }
+
+            donationTransparencyCurrentPage = nextPage;
+            renderDonationTransparencyList();
+        });
+    }
+
+    if (donationTransparencySearchInput) {
+        donationTransparencySearchInput.addEventListener('input', () => {
+            donationTransparencyCurrentPage = 1;
+            renderDonationTransparencyList();
         });
     }
 
@@ -4533,6 +4967,110 @@ function closeDonationLogModal(options = {}) {
     }
 }
 
+function findLocationByIdentifier(identifier) {
+    if (!identifier || !Array.isArray(userReportedLocations)) {
+        return null;
+    }
+
+    return userReportedLocations.find((location) => (
+        location && (
+            location.firestoreId === identifier ||
+            location.id === identifier ||
+            location.locationId === identifier
+        )
+    )) || null;
+}
+
+function setDonationModalLocationFromReport(report) {
+    if (!report) {
+        return false;
+    }
+
+    const locationId = getLocationIdentifier(report);
+    if (!locationId) {
+        return false;
+    }
+
+    refreshDonationLocationOptions();
+    openDonationLogModal({ preserveSelection: true });
+
+    const modeUnreachedInput = document.getElementById('donationLocationModeUnreached');
+    if (modeUnreachedInput) {
+        modeUnreachedInput.checked = true;
+    }
+    updateDonationLocationModeFields({ preserveSelection: true });
+
+    const locationSelect = document.getElementById('donationLocationSelect');
+    if (!locationSelect) {
+        return false;
+    }
+
+    let matchingOption = Array.from(locationSelect.options).find(option => option.value === locationId);
+    if (!matchingOption) {
+        matchingOption = document.createElement('option');
+        matchingOption.value = locationId;
+        matchingOption.textContent = report.locationName || report.name || 'Selected location';
+        matchingOption.dataset.coords = Array.isArray(report.coords) ? report.coords.join(',') : '';
+        locationSelect.appendChild(matchingOption);
+    }
+
+    locationSelect.value = locationId;
+    donationConfirmedLocationId = locationId;
+
+    if (Array.isArray(report.coords) && report.coords.length === 2) {
+        const latitude = Number(report.coords[0]);
+        const longitude = Number(report.coords[1]);
+        if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+            donationPinCoords = { lat: latitude, lng: longitude };
+            donationPinLabel = report.locationName || report.name || 'Selected location';
+            setDonationPinPreview(donationPinLabel, donationPinCoords);
+        }
+    }
+
+    return true;
+}
+
+function openDonationLogForSupportedLocation(identifier) {
+    const report = findLocationByIdentifier(identifier);
+    if (!report) {
+        systemAlert('Unable to load this supported location. Please refresh and try again.');
+        return;
+    }
+
+    const statusData = getResponseStatusData(report);
+    if (statusData.isReached) {
+        systemAlert('This location is already reached and verified.');
+        return;
+    }
+
+    if (!statusData.isOnTheWay && !statusData.isProofSubmitted) {
+        systemAlert('Mark this location as supported first before logging donation proof.');
+        return;
+    }
+
+    if (!isLocationSupportedByCurrentUser(report, statusData)) {
+        systemAlert('Only the assigned supporter can submit donation proof for this location.');
+        return;
+    }
+
+    const isPrefilled = setDonationModalLocationFromReport(report);
+    if (!isPrefilled) {
+        systemAlert('Unable to prefill this location in the donation form.');
+        return;
+    }
+
+    const notesInput = document.getElementById('donationNotes');
+    if (notesInput && !notesInput.value.trim()) {
+        notesInput.value = `Delivery proof for ${report.locationName || report.name || 'supported location'}.`;
+    }
+
+    if (statusData.isProofSubmitted) {
+        showSuccessMessage('Donation log opened. You can update proof while admin review is pending.');
+    } else {
+        showSuccessMessage('Donation log opened. Submit proof once you arrive at the location.');
+    }
+}
+
 function openActivityLogModal() {
     const modal = document.getElementById('activityLogModal');
     if (modal) {
@@ -4546,6 +5084,615 @@ function closeActivityLogModal() {
     if (modal) {
         modal.style.display = 'none';
     }
+}
+
+function getDonationLogStatusMeta(donationLog) {
+    const value = normalizeDonationVerificationStatus(donationLog);
+    if (value === 'approved') {
+        return {
+            value,
+            label: 'Approved',
+            className: 'donation-status--approved',
+            rowClass: 'donation-status-row--approved'
+        };
+    }
+
+    if (value === 'rejected') {
+        return {
+            value,
+            label: 'Rejected',
+            className: 'donation-status--rejected',
+            rowClass: 'donation-status-row--rejected'
+        };
+    }
+
+    if (value === 'pending') {
+        return {
+            value,
+            label: 'Pending',
+            className: 'donation-status--pending',
+            rowClass: 'donation-status-row--pending'
+        };
+    }
+
+    return {
+        value,
+        label: 'Unknown',
+        className: 'donation-status--unknown',
+        rowClass: ''
+    };
+}
+
+function openDonationLogsPanel() {
+    closeDonationTransparencyModal();
+    const modal = document.getElementById('donationLogsPanelModal');
+    if (modal) {
+        modal.style.display = 'flex';
+    }
+    const triggerBtn = document.getElementById('viewDonationsPanelBtn');
+    if (triggerBtn) {
+        triggerBtn.classList.add('is-active');
+    }
+    renderDonationLogsPanelList();
+}
+
+function closeDonationLogsPanel() {
+    const modal = document.getElementById('donationLogsPanelModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+    const triggerBtn = document.getElementById('viewDonationsPanelBtn');
+    if (triggerBtn) {
+        triggerBtn.classList.remove('is-active');
+    }
+}
+
+function toggleDonationLogsPanel() {
+    const modal = document.getElementById('donationLogsPanelModal');
+    if (!modal) {
+        return;
+    }
+
+    const isOpen = modal.style.display === 'flex';
+    if (isOpen) {
+        closeDonationLogsPanel();
+    } else {
+        openDonationLogsPanel();
+    }
+}
+
+function openDonationTransparencyModal() {
+    closeDonationLogsPanel();
+    const modal = document.getElementById('donationTransparencyModal');
+    if (modal) {
+        modal.style.display = 'flex';
+    }
+    donationTransparencyCurrentPage = 1;
+    renderDonationTransparencyList();
+}
+
+function closeDonationTransparencyModal() {
+    const modal = document.getElementById('donationTransparencyModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+function focusDonationLogOnMap(logId) {
+    if (!map || !logId) {
+        return;
+    }
+
+    const donationLog = donationTransparencyLogs.find(log => log && log.firestoreId === logId);
+    if (!donationLog) {
+        return;
+    }
+
+    const coords = getDonationLogCoordinates(donationLog);
+    if (!coords) {
+        systemAlert('This donation log has no map coordinates to view.');
+        return;
+    }
+
+    currentUrgencyFilter = 'all';
+    document.querySelectorAll('.urgency-filter').forEach(filter => {
+        filter.classList.toggle('active', filter.dataset.urgency === 'all');
+    });
+
+    setReachedViewActive(true);
+    refreshMapMarkers();
+    closeDonationLogsPanel();
+    closeDonationTransparencyModal();
+
+    const targetLatLng = L.latLng(coords[0], coords[1]);
+    const centeredLatLng = centerPopupOnScreen(targetLatLng, {
+        zoom: 15,
+        offsetMultiplier: 1.2
+    });
+
+    map.setView(centeredLatLng, 15, {
+        animate: true,
+        duration: 0.5,
+        easeLinearity: 0.25
+    });
+
+    setTimeout(() => {
+        markerLayers.userReported.eachLayer((layer) => {
+            const markerLatLng = layer.getLatLng();
+            if (Math.abs(markerLatLng.lat - coords[0]) < 0.00015 &&
+                Math.abs(markerLatLng.lng - coords[1]) < 0.00015) {
+                layer.openPopup();
+            }
+        });
+    }, 350);
+}
+
+function formatDonationTransparencyDate(value) {
+    const timestamp = getDateValueMs(value);
+    if (!timestamp) {
+        return 'N/A';
+    }
+
+    return new Date(timestamp).toLocaleString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit'
+    });
+}
+
+function getDonationTransparencyItemsSummary(log) {
+    const items = Array.isArray(log && log.items) ? log.items : [];
+    const normalizedItems = items
+        .map((item) => {
+            if (!item || typeof item !== 'object') {
+                return '';
+            }
+
+            const name = (item.name || '').toString().trim();
+            const quantity = item.quantity !== null && item.quantity !== undefined && item.quantity !== ''
+                ? item.quantity
+                : '';
+            const unit = (item.unit || '').toString().trim();
+            const detail = [quantity, unit].filter(Boolean).join(' ').trim();
+
+            if (!name) {
+                return detail;
+            }
+
+            return detail ? `${name} (${detail})` : name;
+        })
+        .filter(Boolean);
+
+    if (!normalizedItems.length) {
+        return 'No item details';
+    }
+
+    const previewItems = normalizedItems.slice(0, 3);
+    const hasMore = normalizedItems.length > previewItems.length;
+    return hasMore
+        ? `${previewItems.join(', ')} (+${normalizedItems.length - previewItems.length} more)`
+        : previewItems.join(', ');
+}
+
+function getDonationLogLocationName(log) {
+    if (!log || typeof log !== 'object') {
+        return 'Unknown location';
+    }
+
+    const locationId = getDonationLogLocationId(log);
+    return (log.location && log.location.name) || getLocationNameById(locationId) || 'Unknown location';
+}
+
+function formatDonationTransparencyRowId(log, index) {
+    const rawId = (log && (log.id || log.firestoreId) ? (log.id || log.firestoreId) : '').toString();
+    const digitGroups = rawId.match(/\d+/g);
+    if (digitGroups && digitGroups.length) {
+        const compactDigits = digitGroups.join('');
+        if (compactDigits) {
+            return `#${compactDigits.slice(-4)}`;
+        }
+    }
+
+    const fallback = Number.isFinite(index) ? index + 1 : 1;
+    return `#${String(fallback).padStart(3, '0')}`;
+}
+
+function getDonationTransparencyContactData(log) {
+    const safeLog = log && typeof log === 'object' ? log : {};
+    const phone = [
+        safeLog.donorContact,
+        safeLog.contactNumber,
+        safeLog.phone,
+        safeLog.mobile,
+        safeLog.mobileNumber
+    ]
+        .map(value => (value || '').toString().trim())
+        .find(Boolean) || 'N/A';
+
+    const email = [
+        safeLog.donorEmail,
+        safeLog.email
+    ]
+        .map(value => (value || '').toString().trim())
+        .find(Boolean) || 'N/A';
+
+    return { phone, email };
+}
+
+function getDonationTransparencyItemChipValues(log) {
+    const items = Array.isArray(log && log.items) ? log.items : [];
+    const itemLabels = items
+        .map((item) => {
+            if (!item || typeof item !== 'object') {
+                return '';
+            }
+            const name = (item.name || '').toString().trim();
+            const quantity = item.quantity !== null && item.quantity !== undefined && item.quantity !== ''
+                ? String(item.quantity).trim()
+                : '';
+            const unit = (item.unit || '').toString().trim();
+            const quantityBlock = [quantity, unit].filter(Boolean).join(' ').trim();
+            if (!name) {
+                return quantityBlock;
+            }
+            return quantityBlock ? `${name} (${quantityBlock})` : name;
+        })
+        .filter(Boolean);
+
+    const cashAmount = Number(log && log.cashAmount);
+    if (Number.isFinite(cashAmount) && cashAmount > 0) {
+        itemLabels.push(`Cash ₱${cashAmount.toLocaleString('en-PH', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        })}`);
+    }
+
+    return itemLabels;
+}
+
+function getDonationViewerIdentity() {
+    const idCandidates = new Set();
+    const emailCandidates = new Set();
+
+    if (window.firebaseAuth && window.firebaseAuth.currentUser) {
+        const authUid = window.firebaseAuth.currentUser.uid;
+        const authEmail = window.firebaseAuth.currentUser.email;
+        if (authUid) {
+            idCandidates.add(String(authUid).trim());
+        }
+        if (authEmail) {
+            emailCandidates.add(String(authEmail).trim().toLowerCase());
+        }
+    }
+
+    if (window.getCurrentUserId) {
+        const currentId = window.getCurrentUserId();
+        if (currentId) {
+            idCandidates.add(String(currentId).trim());
+        }
+    }
+
+    const localFallbackId = localStorage.getItem('localUserId');
+    if (localFallbackId) {
+        idCandidates.add(String(localFallbackId).trim());
+    }
+
+    const guestFallbackId = getStoredGuestId() || localStorage.getItem('guestSessionId');
+    if (guestFallbackId) {
+        idCandidates.add(String(guestFallbackId).trim());
+    }
+
+    return {
+        ids: Array.from(idCandidates).filter(Boolean),
+        emails: Array.from(emailCandidates).filter(Boolean)
+    };
+}
+
+function isDonationLogOwnedByCurrentViewer(log, viewerIdentity = null) {
+    if (!log || typeof log !== 'object') {
+        return false;
+    }
+
+    const identity = viewerIdentity || getDonationViewerIdentity();
+    const ownerIds = [
+        log.createdBy,
+        log.userId,
+        log.donorId
+    ]
+        .map(value => (value || '').toString().trim())
+        .filter(Boolean);
+
+    if (ownerIds.some(ownerId => identity.ids.includes(ownerId))) {
+        return true;
+    }
+
+    const ownerEmail = (log.donorEmail || log.email || '').toString().trim().toLowerCase();
+    if (ownerEmail && identity.emails.includes(ownerEmail)) {
+        return true;
+    }
+
+    return false;
+}
+
+function buildDonationTransparencyPageTokens(totalPages, currentPage) {
+    if (totalPages <= 7) {
+        return Array.from({ length: totalPages }, (_, index) => index + 1);
+    }
+
+    const tokens = [1];
+    const start = Math.max(2, currentPage - 1);
+    const end = Math.min(totalPages - 1, currentPage + 1);
+
+    if (start > 2) {
+        tokens.push('...');
+    }
+
+    for (let page = start; page <= end; page += 1) {
+        tokens.push(page);
+    }
+
+    if (end < totalPages - 1) {
+        tokens.push('...');
+    }
+
+    tokens.push(totalPages);
+    return tokens;
+}
+
+function renderDonationTransparencyPagination(totalPages, currentPage) {
+    const paginationContainer = document.getElementById('donationTransparencyPagination');
+    if (!paginationContainer) {
+        return;
+    }
+
+    if (!Number.isFinite(totalPages) || totalPages <= 0) {
+        paginationContainer.innerHTML = '';
+        paginationContainer.style.display = 'none';
+        return;
+    }
+
+    const safeCurrentPage = Math.min(Math.max(currentPage, 1), totalPages);
+    const tokens = buildDonationTransparencyPageTokens(totalPages, safeCurrentPage);
+    const prevDisabled = safeCurrentPage <= 1;
+    const nextDisabled = safeCurrentPage >= totalPages;
+
+    paginationContainer.style.display = 'flex';
+    paginationContainer.innerHTML = `
+        <button type="button"
+            class="donation-transparency-page-btn donation-transparency-nav-btn"
+            data-page="${safeCurrentPage - 1}"
+            ${prevDisabled ? 'disabled' : ''}
+            aria-label="Previous page">
+            <i class="fas fa-chevron-left"></i>
+        </button>
+        ${tokens.map((token) => {
+            if (token === '...') {
+                return '<span class="donation-transparency-page-ellipsis">...</span>';
+            }
+
+            const isActive = token === safeCurrentPage;
+            return `
+                <button type="button"
+                    class="donation-transparency-page-btn ${isActive ? 'is-active' : ''}"
+                    data-page="${token}"
+                    ${isActive ? 'aria-current="page"' : ''}>
+                    ${token}
+                </button>
+            `;
+        }).join('')}
+        <button type="button"
+            class="donation-transparency-page-btn donation-transparency-nav-btn"
+            data-page="${safeCurrentPage + 1}"
+            ${nextDisabled ? 'disabled' : ''}
+            aria-label="Next page">
+            <i class="fas fa-chevron-right"></i>
+        </button>
+    `;
+}
+
+function renderDonationLogsPanelList() {
+    const listContainer = document.getElementById('donationLogsPanelList');
+    const emptyState = document.getElementById('donationLogsPanelEmpty');
+
+    if (!listContainer || !emptyState) {
+        return;
+    }
+
+    const viewerIdentity = getDonationViewerIdentity();
+    const logs = donationTransparencyLogs
+        .filter(log => isDonationLogOwnedByCurrentViewer(log, viewerIdentity))
+        .slice()
+        .sort((a, b) => getDonationLogSortMs(b) - getDonationLogSortMs(a))
+        .slice(0, 30);
+
+    if (!logs.length) {
+        listContainer.innerHTML = '';
+        emptyState.style.display = 'block';
+        return;
+    }
+
+    emptyState.style.display = 'none';
+
+    listContainer.innerHTML = logs.map((log) => {
+        const logId = (log.firestoreId || '').toString();
+        const hasCoordinates = !!getDonationLogCoordinates(log);
+        const locationName = getDonationLogLocationName(log);
+        const donorName = log.donorName || 'Anonymous';
+        const statusMeta = getDonationLogStatusMeta(log);
+        const submittedAtLabel = formatDonationTransparencyDate(log.submittedAt || log.submittedAtIso);
+        const verifiedAtLabel = formatDonationTransparencyDate(log.verifiedAt);
+        const verifiedBy = (log.verifiedBy || '').toString().trim();
+
+        const verificationLine = statusMeta.value === 'pending'
+            ? '<span><strong>Verification:</strong> Awaiting admin review</span>'
+            : `<span><strong>Verification:</strong> ${escapeHtml(String(verifiedAtLabel))}${verifiedBy ? ` by ${escapeHtml(String(verifiedBy))}` : ''}</span>`;
+
+        return `
+            <article class="donation-log-panel-item">
+                <div class="donation-log-panel-top">
+                    <h4 class="donation-log-panel-title">${escapeHtml(String(locationName))}</h4>
+                    <span class="donation-transparency-status ${statusMeta.className}">${statusMeta.label}</span>
+                </div>
+                <div class="donation-log-panel-meta">
+                    <span><strong>Donor:</strong> ${escapeHtml(String(donorName))}</span>
+                    <span><strong>Submitted:</strong> ${escapeHtml(String(submittedAtLabel))}</span>
+                    ${verificationLine}
+                </div>
+                <div class="donation-log-panel-actions">
+                    <button type="button"
+                        class="btn btn-outline btn-sm donation-log-view-map"
+                        data-log-id="${escapeHtml(logId)}"
+                        ${hasCoordinates ? '' : 'disabled'}>
+                        <i class="fas fa-map-pin"></i> View on map
+                    </button>
+                </div>
+            </article>
+        `;
+    }).join('');
+}
+
+function renderDonationTransparencyList() {
+    const listContainer = document.getElementById('donationTransparencyList');
+    const emptyState = document.getElementById('donationTransparencyEmpty');
+    const searchInput = document.getElementById('donationTransparencySearchInput');
+    const countLabel = document.getElementById('donationTransparencyCountLabel');
+
+    if (!listContainer || !emptyState) {
+        return;
+    }
+
+    const sortedLogs = donationTransparencyLogs
+        .filter(isDonationLogVerifiedByAdmin)
+        .slice()
+        .sort((a, b) => getDonationLogSortMs(b) - getDonationLogSortMs(a));
+
+    if (!sortedLogs.length) {
+        listContainer.innerHTML = '';
+        renderDonationTransparencyPagination(0, 1);
+        if (countLabel) {
+            countLabel.textContent = 'Showing 0 of 0 verified donations';
+        }
+        emptyState.textContent = 'No verified donation logs yet.';
+        emptyState.style.display = 'block';
+        return;
+    }
+
+    const searchTerm = searchInput ? searchInput.value.trim().toLowerCase() : '';
+
+    const filteredLogs = sortedLogs.filter((log) => {
+        const statusMeta = getDonationLogStatusMeta(log);
+
+        if (!searchTerm) {
+            return true;
+        }
+
+        const locationName = getDonationLogLocationName(log);
+        const donorName = (log.donorName || '').toString();
+        const donorType = (log.donorType || '').toString();
+        const contactData = getDonationTransparencyContactData(log);
+        const itemsSummary = getDonationTransparencyItemsSummary(log);
+        const notes = (log.notes || '').toString();
+        const verifiedBy = (log.verifiedBy || '').toString();
+        const statusSearchTokens = statusMeta.value === 'approved'
+            ? 'verified successful approved'
+            : statusMeta.label;
+        const haystack = [
+            locationName,
+            donorName,
+            donorType,
+            contactData.phone,
+            contactData.email,
+            itemsSummary,
+            notes,
+            verifiedBy,
+            statusSearchTokens
+        ].join(' ').toLowerCase();
+
+        return haystack.includes(searchTerm);
+    });
+
+    if (countLabel) {
+        if (!filteredLogs.length) {
+            countLabel.textContent = `Showing 0 of ${sortedLogs.length} verified donations`;
+        }
+    }
+
+    if (!filteredLogs.length) {
+        listContainer.innerHTML = '';
+        renderDonationTransparencyPagination(0, 1);
+        emptyState.textContent = 'No donation logs match your current filter.';
+        emptyState.style.display = 'block';
+        return;
+    }
+
+    const totalPages = Math.max(1, Math.ceil(filteredLogs.length / DONATION_TRANSPARENCY_PAGE_SIZE));
+    donationTransparencyCurrentPage = Math.min(Math.max(donationTransparencyCurrentPage, 1), totalPages);
+    const startIndex = (donationTransparencyCurrentPage - 1) * DONATION_TRANSPARENCY_PAGE_SIZE;
+    const endIndex = Math.min(startIndex + DONATION_TRANSPARENCY_PAGE_SIZE, filteredLogs.length);
+    const visibleLogs = filteredLogs.slice(startIndex, endIndex);
+
+    if (countLabel) {
+        countLabel.textContent = `Showing ${startIndex + 1}-${endIndex} of ${filteredLogs.length} verified donations`;
+    }
+
+    renderDonationTransparencyPagination(totalPages, donationTransparencyCurrentPage);
+    emptyState.style.display = 'none';
+
+    listContainer.innerHTML = visibleLogs.map((log, index) => {
+        const locationName = getDonationLogLocationName(log);
+        const coords = getDonationLogCoordinates(log);
+        const coordsLabel = coords
+            ? `${Number(coords[0]).toFixed(4)}, ${Number(coords[1]).toFixed(4)}`
+            : '';
+        const rowId = formatDonationTransparencyRowId(log, startIndex + index);
+        const donorName = log.donorName || 'Anonymous';
+        const donorType = (log.donorType || 'individual').toString();
+        const contactData = getDonationTransparencyContactData(log);
+        const statusMeta = getDonationLogStatusMeta(log);
+        const publicStatusLabel = statusMeta.value === 'approved' ? 'Verified' : statusMeta.label;
+        const submittedAtLabel = formatDonationTransparencyDate(log.submittedAt || log.submittedAtIso);
+        const itemLabels = getDonationTransparencyItemChipValues(log);
+        const visibleItemLabels = itemLabels.slice(0, 3);
+        const moreCount = Math.max(itemLabels.length - visibleItemLabels.length, 0);
+        const itemChipsMarkup = visibleItemLabels.length
+            ? visibleItemLabels.map((label) => `<span class="donation-item-chip">${escapeHtml(String(label))}</span>`).join('')
+            : '<span class="donation-item-chip donation-item-chip--more">No item details</span>';
+        const itemMoreMarkup = moreCount > 0
+            ? `<span class="donation-item-chip donation-item-chip--more">+${moreCount} more</span>`
+            : '';
+
+        return `
+            <tr class="${statusMeta.rowClass}">
+                <td class="donation-transparency-id">${escapeHtml(String(rowId))}</td>
+                <td>
+                    <div class="donation-donor-name">${escapeHtml(String(donorName))}</div>
+                    <span class="donation-donor-type-pill">${escapeHtml(String(donorType))}</span>
+                </td>
+                <td>
+                    <div class="donation-contact-line"><i class="fas fa-phone"></i><span>${escapeHtml(String(contactData.phone))}</span></div>
+                    <div class="donation-contact-line"><i class="fas fa-envelope"></i><span>${escapeHtml(String(contactData.email))}</span></div>
+                </td>
+                <td>
+                    <div class="donation-item-chips">
+                        ${itemChipsMarkup}
+                        ${itemMoreMarkup}
+                    </div>
+                </td>
+                <td>
+                    <div class="donation-address-text">${escapeHtml(String(locationName))}</div>
+                    ${coordsLabel ? `<div class="donation-address-sub">${escapeHtml(String(coordsLabel))}</div>` : ''}
+                </td>
+                <td>
+                    <span class="donation-date-line"><i class="fas fa-calendar"></i>${escapeHtml(String(submittedAtLabel))}</span>
+                </td>
+                <td>
+                    <span class="donation-transparency-status ${statusMeta.className}">${publicStatusLabel}</span>
+                </td>
+            </tr>
+        `;
+    }).join('');
 }
 
 function formatActivityTimestamp(timestamp) {
@@ -4698,7 +5845,7 @@ function refreshDonationLocationOptions() {
     const supportedLocations = Array.isArray(userReportedLocations)
         ? userReportedLocations.filter((location) => {
             const status = getResponseStatusData(location);
-            if (!status.isReached && !status.isOnTheWay) {
+            if (!status.isReached && !status.isOnTheWay && !status.isProofSubmitted) {
                 return false;
             }
             return isLocationSupportedByCurrentUser(location, status);
@@ -5285,6 +6432,11 @@ async function submitDonationLog(event) {
         }
 
         await saveDonationLogToFirestore(normalizedDonationLog);
+        if (normalizedDonationLog.location &&
+            normalizedDonationLog.location.type === 'supported' &&
+            normalizedDonationLog.locationId) {
+            await markLocationDonationProofSubmitted(normalizedDonationLog.locationId, normalizedDonationLog);
+        }
         addGuestActivity({
             type: 'donation',
             locationId: normalizedDonationLog.locationId,
@@ -5561,8 +6713,8 @@ function addUserReportedMarker(report) {
     const matchesUrgency = currentUrgencyFilter === 'all' ||
         getReportUrgency(report) === currentUrgencyFilter;
 
-    const isReached = report.reached === true;
-    const matchesReached = isReachedViewActive ? isReached : !isReached;
+    const statusData = getResponseStatusData(report);
+    const matchesReached = isReachedViewActive ? statusData.isReached : !statusData.isReached;
 
     if (matchesUrgency && matchesReached) {
         addUserReportedMarkerToMap(report);
@@ -5579,7 +6731,20 @@ function getUrgencyColor(urgencyLevel) {
 }
 
 function getResponseStatusData(report) {
-    const isReached = report.reached === true;
+    const locationIdentifier = getLocationIdentifier(report);
+    const donationVerification = locationIdentifier
+        ? approvedDonationInfoByLocationId.get(locationIdentifier)
+        : null;
+    const pendingDonationVerification = locationIdentifier
+        ? pendingDonationInfoByLocationId.get(locationIdentifier)
+        : null;
+    const hasApprovedDonation = locationIdentifier
+        ? approvedDonationLocationIds.has(locationIdentifier)
+        : false;
+    const hasPendingDonation = locationIdentifier
+        ? pendingDonationLocationIds.has(locationIdentifier)
+        : false;
+    const isReached = report.reached === true || hasApprovedDonation;
     const respondingName = [
         report.donorResponding,
         report.respondingTeam,
@@ -5592,7 +6757,15 @@ function getResponseStatusData(report) {
         .find(value => value) || '';
     const responseStatusValue = (report.responseStatus || report.reliefStatus || '').toString().toLowerCase();
     const supportStatusValue = (report.supportStatus || report.support_status || '').toString().toLowerCase();
-    const isOnTheWay = !isReached && (
+    const hasProofSubmittedSignal = (
+        supportStatusValue.includes('proof submitted') ||
+        supportStatusValue.includes('proof_submitted') ||
+        responseStatusValue.includes('proof submitted') ||
+        responseStatusValue.includes('proof_submitted') ||
+        Boolean(report.proofSubmittedAt)
+    );
+    const isProofSubmitted = !isReached && (hasPendingDonation || hasProofSubmittedSignal);
+    const isOnTheWay = !isReached && !isProofSubmitted && (
         report.onTheWay === true ||
         report.on_the_way === true ||
         supportStatusValue.includes('on the way') ||
@@ -5609,9 +6782,14 @@ function getResponseStatusData(report) {
 
     return {
         isReached,
+        isProofSubmitted,
         isOnTheWay,
         respondingName,
-        responseStatusValue
+        responseStatusValue,
+        hasApprovedDonation,
+        hasPendingDonation,
+        donationVerification,
+        pendingDonationVerification
     };
 }
 
@@ -5678,10 +6856,28 @@ function createUserReportPopup(report) {
         ? 'Only master admins can remove this'
         : 'Only the creator can remove this';
 
-    const { isReached, isOnTheWay, respondingName } = getResponseStatusData(report);
+    const statusData = getResponseStatusData(report);
+    const { isReached, isProofSubmitted, isOnTheWay, respondingName } = statusData;
     const safeRespondingName = respondingName ? escapeHtml(respondingName) : '';
     const safeReachedTeam = report.reachedByTeam ? escapeHtml(report.reachedByTeam) : '';
-    const donorIsResponding = isLocationSupportedByCurrentUser(report, { respondingName, isReached, isOnTheWay });
+    const proofSubmitterName = (
+        (statusData.pendingDonationVerification && statusData.pendingDonationVerification.donorName) ||
+        report.proofSubmittedBy ||
+        respondingName ||
+        'Assigned supporter'
+    );
+    const proofSubmittedAt = report.proofSubmittedAt ||
+        (statusData.pendingDonationVerification && statusData.pendingDonationVerification.submittedAt) ||
+        null;
+    const safeProofSubmitterName = proofSubmitterName ? escapeHtml(String(proofSubmitterName)) : 'Assigned supporter';
+    const proofSubmittedAtLabel = proofSubmittedAt
+        ? new Date(proofSubmittedAt).toLocaleString()
+        : '';
+    const donationVerifiedBy = statusData.donationVerification && statusData.donationVerification.verifiedBy
+        ? escapeHtml(String(statusData.donationVerification.verifiedBy))
+        : '';
+    const isDonationVerifiedReached = statusData.hasApprovedDonation === true;
+    const donorIsResponding = isLocationSupportedByCurrentUser(report, { respondingName, isReached, isProofSubmitted, isOnTheWay });
     const isDonorMap = window.isDonorMap === true;
 
     let actionButton = canDelete ?
@@ -5696,21 +6892,53 @@ function createUserReportPopup(report) {
         if (isReached) {
             const reachedMessage = safeReachedTeam
                 ? `Reached by ${safeReachedTeam}`
-                : 'Reached by another team';
+                : (isDonationVerifiedReached
+                    ? `Reached via admin-verified donation${donationVerifiedBy ? ` (${donationVerifiedBy})` : ''}`
+                    : 'Reached by another team');
             actionButton = `
                 <span class="text-muted" style="font-size: 0.85rem; padding: 0.5rem; display: inline-flex; align-items: center; gap: 0.4rem;">
                     <i class="fas fa-flag-checkered"></i> ${reachedMessage}
                 </span>
             `;
+        } else if (isProofSubmitted) {
+            if (donorIsResponding) {
+                actionButton = `
+                    <div style="display: grid; gap: 0.35rem;">
+                        <button onclick="openDonationLogForSupportedLocation('${uniqueId}')" class="btn btn-info btn-sm" title="Update donation proof">
+                            <i class="fas fa-hand-holding-heart"></i> Update donation proof
+                        </button>
+                        <small style="color: #475569;">
+                            Awaiting master admin verification.
+                        </small>
+                    </div>
+                `;
+            } else {
+                actionButton = `
+                    <span class="text-muted" style="font-size: 0.85rem; padding: 0.5rem; display: inline-flex; align-items: center; gap: 0.4rem;">
+                        <i class="fas fa-hourglass-half"></i> Proof submitted by ${safeProofSubmitterName}. Waiting for admin review.
+                    </span>
+                `;
+            }
         } else if (isOnTheWay) {
-            const supportMessage = donorIsResponding
-                ? 'You are supporting this location'
-                : `Currently supported by ${safeRespondingName || 'another team'}`;
-            actionButton = `
-                <span class="text-muted" style="font-size: 0.85rem; padding: 0.5rem; display: inline-flex; align-items: center; gap: 0.4rem;">
-                    <i class="fas fa-route"></i> ${supportMessage}
-                </span>
-            `;
+            if (donorIsResponding) {
+                actionButton = `
+                    <div style="display: grid; gap: 0.35rem;">
+                        <button onclick="openDonationLogForSupportedLocation('${uniqueId}')" class="btn btn-success btn-sm" title="Log donation proof">
+                            <i class="fas fa-hand-holding-heart"></i> Log donation proof
+                        </button>
+                        <small style="color: #475569;">
+                            Submit proof after delivery so admin can mark this reached.
+                        </small>
+                    </div>
+                `;
+            } else {
+                const supportMessage = `Currently supported by ${safeRespondingName || 'another team'}`;
+                actionButton = `
+                    <span class="text-muted" style="font-size: 0.85rem; padding: 0.5rem; display: inline-flex; align-items: center; gap: 0.4rem;">
+                        <i class="fas fa-route"></i> ${supportMessage}
+                    </span>
+                `;
+            }
         } else {
             actionButton = `
                 <button onclick="supportLocationForDonor('${uniqueId}')" class="btn btn-success btn-sm" title="Support this location">
@@ -5733,23 +6961,31 @@ function createUserReportPopup(report) {
     `;
         }
 
-        const statusLabel = isOnTheWay ? 'On the way' : 'Unreached';
-        const supporterLabel = isOnTheWay ? 'Supported by' : 'Donor Responding';
-        const statusStyles = isOnTheWay
+        const statusLabel = isProofSubmitted ? 'Proof submitted' : (isOnTheWay ? 'On the way' : 'Unreached');
+        const supporterLabel = isProofSubmitted ? 'Submitted by' : (isOnTheWay ? 'Supported by' : 'Donor Responding');
+        const statusStyles = isProofSubmitted
             ? {
-                background: '#dbeafe', // Light blue
-                border: '#1d4ed8',     // Darker blue
-                text: '#1e3a8a',       // Even darker blue
-                icon: 'fa-route',
-                donor: safeRespondingName || 'Unassigned'
+                background: '#ede9fe',
+                border: '#7c3aed',
+                text: '#5b21b6',
+                icon: 'fa-clipboard-check',
+                donor: safeProofSubmitterName
             }
-            : {
-                background: '#f8f9fa',
-                border: '#6c757d',
-                text: '#495057',
-                icon: 'fa-clock',
-                donor: 'None yet'
-            };
+            : isOnTheWay
+                ? {
+                    background: '#dbeafe', // Light blue
+                    border: '#1d4ed8',     // Darker blue
+                    text: '#1e3a8a',       // Even darker blue
+                    icon: 'fa-route',
+                    donor: safeRespondingName || 'Unassigned'
+                }
+                : {
+                    background: '#f8f9fa',
+                    border: '#6c757d',
+                    text: '#495057',
+                    icon: 'fa-clock',
+                    donor: 'None yet'
+                };
 
         // Get supporter type and contact for on-the-way locations
         let supporterTypeInfo = '';
@@ -5780,6 +7016,9 @@ function createUserReportPopup(report) {
             <p style="margin: 0.25rem 0 0 0; color: ${statusStyles.text}; font-size: 0.9rem;">
                 <strong>${supporterLabel}:</strong> ${statusStyles.donor}${supporterTypeInfo}
             </p>
+            ${isProofSubmitted && proofSubmittedAtLabel ? `<p style="margin: 0.25rem 0 0 0; color: ${statusStyles.text}; font-size: 0.8rem;">
+                <strong>Submitted:</strong> ${escapeHtml(proofSubmittedAtLabel)}
+            </p>` : ''}
             ${contactInfo}
         </div>
     `;
@@ -6010,7 +7249,7 @@ async function supportLocationForDonor(identifier) {
     }
 
     const report = userReportedLocations[reportIndex];
-    const { isReached, isOnTheWay } = getResponseStatusData(report);
+    const { isReached, isProofSubmitted, isOnTheWay } = getResponseStatusData(report);
 
     if (isReached) {
         systemAlert('This location is already marked as reached.');
@@ -6019,6 +7258,11 @@ async function supportLocationForDonor(identifier) {
 
     if (isOnTheWay) {
         systemAlert('This location is already being supported.');
+        return false;
+    }
+
+    if (isProofSubmitted) {
+        systemAlert('Donation proof was already submitted for this location. Awaiting admin review.');
         return false;
     }
 
@@ -6059,6 +7303,8 @@ async function supportLocationForDonor(identifier) {
 
     const updatePayload = {
         onTheWay: true,
+        on_the_way: true,
+        reached: false,
         responseStatus: 'on the way',
         donorResponding: supporterName,
         respondingTeam: supporterName,
@@ -6073,7 +7319,12 @@ async function supportLocationForDonor(identifier) {
         supporterAnonymous,
         supporterFirstName,
         supporterLastName,
-        supporterTeamName
+        supporterTeamName,
+        proofSubmittedAt: null,
+        proofSubmittedBy: null,
+        proofVerificationStatus: null,
+        proofVerifiedAt: null,
+        proofVerifiedBy: null
     };
 
     if (report.firestoreId && db) {
@@ -6191,11 +7442,11 @@ let currentUrgencyFilter = 'all';
 let isReachedViewActive = false;
 
 function getReachedLocations() {
-    return userReportedLocations.filter(location => location.reached);
+    return getAllLocationsForDisplay().filter(location => getResponseStatusData(location).isReached);
 }
 
 function getUnreachedLocations() {
-    return userReportedLocations.filter(location => !location.reached);
+    return getAllLocationsForDisplay().filter(location => !getResponseStatusData(location).isReached);
 }
 
 function getLocationsForView() {
@@ -6305,7 +7556,7 @@ function updateDonorDashboardOverview() {
         return;
     }
 
-    const locations = Array.isArray(userReportedLocations) ? userReportedLocations : [];
+    const locations = getAllLocationsForDisplay();
     const statusData = locations.map(location => ({
         location,
         ...getResponseStatusData(location)
@@ -6313,7 +7564,8 @@ function updateDonorDashboardOverview() {
 
     const reachedCount = statusData.filter(item => item.isReached).length;
     const onTheWayCount = statusData.filter(item => item.isOnTheWay).length;
-    const unreachedCount = statusData.filter(item => !item.isReached && !item.isOnTheWay).length;
+    const proofSubmittedCount = statusData.filter(item => item.isProofSubmitted).length;
+    const unreachedCount = statusData.filter(item => !item.isReached && !item.isOnTheWay && !item.isProofSubmitted).length;
     const totalCount = locations.length;
 
     if (mapStatusLabel) {
@@ -6331,7 +7583,8 @@ function updateDonorDashboardOverview() {
             mapCountLabel.textContent = '0 locations loaded';
         } else {
             const onTheWayText = onTheWayCount ? ` • ${onTheWayCount} on the way` : '';
-            mapCountLabel.textContent = `${totalCount} locations loaded${onTheWayText}`;
+            const proofSubmittedText = proofSubmittedCount ? ` • ${proofSubmittedCount} proof submitted` : '';
+            mapCountLabel.textContent = `${totalCount} locations loaded${onTheWayText}${proofSubmittedText}`;
         }
     }
 
@@ -6339,7 +7592,7 @@ function updateDonorDashboardOverview() {
         const query = unreachedSearch ? unreachedSearch.value.toLowerCase().trim() : '';
         const urgencyFilter = unreachedFilter ? unreachedFilter.value : 'all';
         const filteredUnreached = statusData
-            .filter(item => !item.isReached && !item.isOnTheWay)
+            .filter(item => !item.isReached && !item.isOnTheWay && !item.isProofSubmitted)
             .map(item => item.location)
             .filter(location => matchesDonorSearch(location, query))
             .filter(location => urgencyFilter === 'all' || getReportUrgency(location) === urgencyFilter);
@@ -6357,11 +7610,13 @@ function updateDonorDashboardOverview() {
         const query = claimsSearch ? claimsSearch.value.toLowerCase().trim() : '';
         const claimFilterValue = claimsFilter ? claimsFilter.value : 'all';
         const claimEntries = statusData
-            .filter(item => (item.isOnTheWay || item.isReached))
+            .filter(item => (item.isOnTheWay || item.isProofSubmitted || item.isReached))
             .filter(item => isLocationSupportedByCurrentUser(item.location, item))
             .map(item => ({
                 location: item.location,
-                claimStatus: item.isReached ? 'pending' : 'on-the-way',
+                claimStatus: item.isReached
+                    ? 'pending'
+                    : (item.isProofSubmitted ? 'proof-submitted' : 'on-the-way'),
                 respondingName: item.respondingName
             }))
             .filter(entry => claimFilterValue === 'all' || entry.claimStatus === claimFilterValue)
@@ -6446,10 +7701,14 @@ function buildDonorLocationCard(location, options) {
     let cardStatusClass = statusClass;
     let cardStatusIcon = statusIcon;
     if (location._claimStatus) {
-        if (location._claimStatus === 'pending') {
+        if (location._claimStatus === 'pending' || location._claimStatus === 'reached') {
             cardStatusLabel = 'Reached';
             cardStatusClass = 'status-pending';
             cardStatusIcon = 'fa-check-circle';
+        } else if (location._claimStatus === 'proof-submitted') {
+            cardStatusLabel = 'Proof submitted';
+            cardStatusClass = 'status-pending';
+            cardStatusIcon = 'fa-clipboard-check';
         } else if (location._claimStatus === 'on-the-way') {
             cardStatusLabel = 'On the way';
             cardStatusClass = 'status-claimed';
@@ -6854,20 +8113,23 @@ function filterMapMarkers() {
     // Clear all existing markers
     markerLayers.userReported.clearLayers();
 
+    const locations = getAllLocationsForDisplay();
+
     // Add back only markers that match both urgency and search filters
-    userReportedLocations.forEach(report => {
+    locations.forEach(report => {
         // Check urgency filter
         const matchesUrgency = currentUrgencyFilter === 'all' ||
             getReportUrgency(report) === currentUrgencyFilter;
 
         // Check search filter
+        const reliefNeeds = Array.isArray(report.reliefNeeds) ? report.reliefNeeds : [];
         const peopleCountMatch =
             report.peopleCount !== undefined &&
             report.peopleCount !== null &&
             String(report.peopleCount).includes(currentSearchQuery);
         const matchesSearch = !currentSearchQuery ||
             (report.locationName || report.name || '').toLowerCase().includes(currentSearchQuery) ||
-            report.reliefNeeds.some(need => need.toLowerCase().includes(currentSearchQuery)) ||
+            reliefNeeds.some(need => need.toLowerCase().includes(currentSearchQuery)) ||
             report.additionalInfo?.toLowerCase().includes(currentSearchQuery) ||
             peopleCountMatch ||
             isLocationNearCity(report, currentSearchQuery);
@@ -6884,9 +8146,10 @@ function isLocationNearCity(location, searchQuery) {
     if (!searchQuery) return false;
 
     const query = searchQuery.toLowerCase().trim();
+    const locationName = (location && (location.name || location.locationName) ? (location.name || location.locationName) : '').toString().toLowerCase();
 
     // First, check if the location name contains the search term
-    if (location.name.toLowerCase().includes(query)) {
+    if (locationName.includes(query)) {
         return true;
     }
 
@@ -6940,8 +8203,8 @@ function isLocationNearCity(location, searchQuery) {
 
     // Enhanced proximity search: check if any existing location names contain the search term
     // and if so, find locations near those matching locations
-    const matchingLocations = userReportedLocations.filter(loc =>
-        loc.name.toLowerCase().includes(query) && loc !== location
+    const matchingLocations = getAllLocationsForDisplay().filter(loc =>
+        ((loc.name || loc.locationName || '').toString().toLowerCase().includes(query)) && loc !== location
     );
 
     if (matchingLocations.length > 0) {
@@ -6956,7 +8219,7 @@ function isLocationNearCity(location, searchQuery) {
     }
 
     // Enhanced text matching for partial place names
-    const locationParts = location.name.toLowerCase().split(/[\s,.-]+/);
+    const locationParts = locationName.split(/[\s,.-]+/);
     const queryParts = query.split(/[\s,.-]+/);
 
     // Check if any part of the query matches any part of the location name
@@ -6998,9 +8261,10 @@ function filterPinsBySearchLocation(searchCoords, searchDisplayName) {
 
     // Define search radius (in kilometers)
     const searchRadius = 10; // 10km radius around searched location
+    const locations = getAllLocationsForDisplay();
 
     // Filter locations based on proximity to searched location
-    const nearbyLocations = userReportedLocations.filter(report => {
+    const nearbyLocations = locations.filter(report => {
         const distance = calculateDistance(
             searchCoords[0], searchCoords[1],
             report.coords[0], report.coords[1]
@@ -7015,7 +8279,7 @@ function filterPinsBySearchLocation(searchCoords, searchDisplayName) {
 
     // Show notification about filtering
     const pinCount = nearbyLocations.length;
-    const totalPins = userReportedLocations.length;
+    const totalPins = locations.length;
 
     if (pinCount < totalPins) {
         showFilterNotification(`Showing ${pinCount} of ${totalPins} pins within ${searchRadius}km of "${searchDisplayName}"`);
@@ -7033,7 +8297,7 @@ function restoreAllPins() {
         filterPinnedLocations();
     } else {
         // Otherwise, show all pins
-        userReportedLocations.forEach(report => {
+        getAllLocationsForDisplay().forEach(report => {
             addUserReportedMarkerToMap(report);
         });
     }
@@ -7094,12 +8358,14 @@ function filterPinsRealTime(query) {
     markerLayers.userReported.clearLayers();
 
     const queryLower = query.toLowerCase().trim();
+    const locations = getAllLocationsForDisplay();
 
     // Filter locations based on multiple criteria
-    const matchingLocations = userReportedLocations.filter(report => {
+    const matchingLocations = locations.filter(report => {
         // Text-based matching (name, relief needs, additional info)
         const nameMatch = (report.locationName || report.name || '').toLowerCase().includes(queryLower);
-        const reliefMatch = report.reliefNeeds.some(need =>
+        const reliefNeeds = Array.isArray(report.reliefNeeds) ? report.reliefNeeds : [];
+        const reliefMatch = reliefNeeds.some(need =>
             need.toLowerCase().includes(queryLower)
         );
         const infoMatch = report.additionalInfo?.toLowerCase().includes(queryLower);
@@ -7121,7 +8387,7 @@ function filterPinsRealTime(query) {
 
     // Show real-time filter notification
     const pinCount = matchingLocations.length;
-    const totalPins = userReportedLocations.length;
+    const totalPins = locations.length;
 
     if (pinCount < totalPins && pinCount > 0) {
         showRealTimeFilterNotification(`Showing ${pinCount} of ${totalPins} pins matching "${query}"`);
@@ -7473,7 +8739,7 @@ function refreshMapMarkers() {
     markerLayers.userReported.clearLayers();
 
     // Re-add all markers with updated data
-    userReportedLocations.forEach(report => {
+    getAllLocationsForDisplay().forEach(report => {
         addUserReportedMarker(report);
     });
 }
@@ -8424,4 +9690,5 @@ window.saveChatMessage = saveChatMessage;
 window.loadChatMessages = loadChatMessages;
 window.deleteMessage = deleteMessage;
 window.togglePhotos = togglePhotos;
+window.openDonationLogForSupportedLocation = openDonationLogForSupportedLocation;
 

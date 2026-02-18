@@ -76,6 +76,9 @@
                 <button id="approveDonationLog" class="btn btn-success">
                     <i class="fas fa-check"></i> Approve
                 </button>
+                <button id="undoDonationLogDecision" class="btn btn-secondary" style="display: none;">
+                    <i class="fas fa-rotate-left"></i> Undo decision
+                </button>
             </div>
         </div>
     </div>
@@ -161,6 +164,10 @@
             <div class="section-toggle" role="tablist" aria-label="Admin data views">
                 <button id="showPinsBtn" class="btn btn-info btn-sm is-active" type="button" aria-pressed="true">
                     <i class="fas fa-map-pin"></i> Pins Table
+                </button>
+                <button id="showSupportedLocationsBtn" class="btn btn-secondary btn-sm" type="button"
+                    aria-pressed="false">
+                    <i class="fas fa-route"></i> Supported Locations
                 </button>
                 <button id="showDonationLogsBtn" class="btn btn-secondary btn-sm" type="button" aria-pressed="false">
                     <i class="fas fa-hand-holding-heart"></i> Donation Logs
@@ -256,6 +263,69 @@
                 </div>
             </div>
 
+            <div id="supportedSection" class="admin-section" style="display: none;">
+                <div class="admin-section-header">
+                    <div>
+                        <h2><i class="fas fa-route"></i> Supported Locations</h2>
+                        <p>Track active support operations and confirm arrivals as reached.</p>
+                    </div>
+                </div>
+                <div class="admin-controls donation-controls">
+                    <div class="search-container">
+                        <i class="fas fa-search"></i>
+                        <input type="text" id="supportedSearch"
+                            placeholder="Search by location, responder, source, or reporter...">
+                    </div>
+                    <div class="filter-container">
+                        <label><i class="fas fa-signal"></i> Support Status:</label>
+                        <select id="supportedStatusFilter">
+                            <option value="all">All Supported</option>
+                            <option value="on-the-way">On-the-way only</option>
+                            <option value="proof-submitted">Proof submitted</option>
+                            <option value="reached">Reached only</option>
+                        </select>
+                    </div>
+                    <div class="filter-container">
+                        <label><i class="fas fa-filter"></i> Urgency:</label>
+                        <select id="supportedUrgencyFilter">
+                            <option value="all">All Urgency Levels</option>
+                            <option value="critical">Critical</option>
+                            <option value="urgent">Urgent</option>
+                            <option value="moderate">Moderate</option>
+                        </select>
+                    </div>
+                    <button id="refreshSupportedLocations" class="btn btn-info btn-sm">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                </div>
+                <div class="pins-table-container supported-table">
+                    <table class="pins-table">
+                        <thead>
+                            <tr>
+                                <th>Location</th>
+                                <th>Urgency</th>
+                                <th>Responder</th>
+                                <th>Status</th>
+                                <th>Updated</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="supportedLocationsBody">
+                            <tr>
+                                <td colspan="6" class="loading-row">
+                                    <i class="fas fa-spinner fa-spin"></i> Loading supported locations...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div id="supportedLocationsEmpty" class="empty-state" style="display: none;">
+                    <i class="fas fa-route"></i>
+                    <h3>No supported locations found</h3>
+                    <p>Locations move here once a donor/team marks them on-the-way, submits proof, or gets reached verification.</p>
+                </div>
+            </div>
+
             <div id="donationLogsSection" class="admin-section" style="display: none;">
                 <div class="admin-section-header">
                     <div>
@@ -273,6 +343,7 @@
                         <select id="donationDeliveryFilter">
                             <option value="all">All Deliveries</option>
                             <option value="on-the-way">On-the-way operations</option>
+                            <option value="proof-submitted">Proof submitted</option>
                             <option value="reached">Donations reached</option>
                         </select>
                     </div>
@@ -369,15 +440,24 @@
                         <li><strong>Filter by Urgency:</strong> Show Critical, Urgent, or Moderate reports</li>
                         <li><strong>Filter by Status:</strong> View reached or not-reached locations</li>
                         <li><strong>Sort:</strong> Order by date, urgency, or name</li>
-                        <li><strong>Actions:</strong> View details, delete pins, mark as reached</li>
+                        <li><strong>Actions:</strong> Use the 3-dot menu for View, Open map, Edit, and Delete</li>
+                    </ul>
+
+                    <h4><i class="fas fa-route"></i> Supported Locations</h4>
+                    <p>Manage support progress and confirm arrivals:</p>
+                    <ul>
+                        <li><strong>Search:</strong> Find active support by location, responder, or source</li>
+                        <li><strong>Support Status:</strong> Filter on-the-way, proof-submitted, or reached locations</li>
+                        <li><strong>Actions:</strong> Primary button changes by state: Ping for proof, Review proof, or Undo reached</li>
+                        <li><strong>More Actions:</strong> 3-dot menu for Donation workflow, View, Edit, Open map, or Delete</li>
                     </ul>
 
                     <h4><i class="fas fa-hand-holding-heart"></i> Donation Logs</h4>
                     <p>Review and verify submitted donation deliveries:</p>
                     <ul>
                         <li><strong>Search:</strong> Find donations by donor name or location</li>
-                        <li><strong>Delivery Status:</strong> Filter by on-the-way or reached donations</li>
-                        <li><strong>Actions:</strong> View details, approve or reject donations</li>
+                        <li><strong>Delivery Status:</strong> Filter by on-the-way, proof-submitted, or reached donations</li>
+                        <li><strong>Actions:</strong> View details, approve/reject pending logs, and undo decisions</li>
                     </ul>
 
                     <h4><i class="fas fa-user-shield"></i> Master Admin Features</h4>
@@ -407,14 +487,17 @@
 
     <!-- Team Name Modal -->
     <div id="teamNameModal" class="modal" style="display: none;">
-        <div class="modal-content">
+        <div class="modal-content team-flow-modal">
             <div class="modal-header" style="background: #28a745; color: white;">
                 <h3><i class="fas fa-users"></i> Response Team</h3>
                 <button id="closeTeamModal" class="close-btn" style="color: white;">&times;</button>
             </div>
             <div class="modal-body">
+                <p id="teamLocationLabel" class="team-location-label">
+                    <i class="fas fa-map-marker-alt"></i> Selected location: --
+                </p>
                 <p style="margin-bottom: 1rem; color: #666;">
-                    <i class="fas fa-info-circle"></i> Enter your response team name to mark this location as reached.
+                    <i class="fas fa-info-circle"></i> Confirm team details and choose how this reached update is verified.
                 </p>
                 <div class="form-group">
                     <label for="teamNameInput" style="font-weight: 600; margin-bottom: 0.5rem; display: block;">
@@ -423,11 +506,88 @@
                     <input type="text" id="teamNameInput" class="form-control" placeholder="e.g., Red Cross Team Alpha"
                         style="width: 100%; padding: 0.75rem; border: 2px solid #e0e0e0; border-radius: 6px; font-size: 1rem;">
                 </div>
+
+                <div class="team-reached-flow">
+                    <label class="team-flow-option">
+                        <input type="radio" name="teamReachedFlow" id="teamReachedFlowDonation" value="donation" checked>
+                        <span>
+                            <strong>Require approved donation log (Recommended)</strong>
+                            <small>Use Donation Logs tab as proof before marking reached.</small>
+                        </span>
+                    </label>
+                    <label class="team-flow-option">
+                        <input type="radio" name="teamReachedFlow" id="teamReachedFlowManual" value="manual">
+                        <span>
+                            <strong>Mark reached without donation log</strong>
+                            <small>Use only for verified field operations.</small>
+                        </span>
+                    </label>
+                </div>
+
+                <div class="form-group" id="teamManualReasonGroup" style="display: none;">
+                    <label for="teamManualReasonInput" style="font-weight: 600; margin-bottom: 0.5rem; display: block;">
+                        <i class="fas fa-note-sticky"></i> Reason (required for manual mode):
+                    </label>
+                    <textarea id="teamManualReasonInput" class="form-control" rows="3"
+                        placeholder="Explain why this location is being marked as reached without donation log verification."></textarea>
+                </div>
+
+                <div class="team-flow-actions">
+                    <button id="openDonationWorkflowFromReached" type="button" class="btn btn-secondary">
+                        <i class="fas fa-hand-holding-heart"></i> Open Donation Logs Workflow
+                    </button>
+                </div>
+                <p id="teamModalError" class="team-modal-error" style="display: none;"></p>
             </div>
             <div class="modal-footer">
                 <button id="cancelTeamName" class="btn btn-secondary">Cancel</button>
                 <button id="confirmTeamName" class="btn" style="background: #28a745; color: white;">
                     <i class="fas fa-check"></i> Mark as Reached
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Location Modal -->
+    <div id="editLocationModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-pen-to-square"></i> Edit Location</h3>
+                <button id="closeEditLocationModal" class="close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p id="editLocationMeta" class="text-muted" style="margin-bottom: 1rem;">Document: --</p>
+                <div class="form-group">
+                    <label for="editLocationName">Location name</label>
+                    <input type="text" id="editLocationName" class="form-control" placeholder="Location name">
+                </div>
+                <div class="form-group">
+                    <label for="editUrgencyLevel">Urgency</label>
+                    <select id="editUrgencyLevel" class="form-control">
+                        <option value="critical">Critical</option>
+                        <option value="urgent">Urgent</option>
+                        <option value="moderate">Moderate</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="editLocationSource">Source</label>
+                    <input type="text" id="editLocationSource" class="form-control" placeholder="facebook / personal / etc">
+                </div>
+                <div class="form-group">
+                    <label for="editReliefNeeds">Relief needs (comma-separated)</label>
+                    <input type="text" id="editReliefNeeds" class="form-control" placeholder="relief goods, clean water">
+                </div>
+                <div class="form-group">
+                    <label for="editAdditionalInfo">Additional info</label>
+                    <textarea id="editAdditionalInfo" class="form-control" rows="3"
+                        placeholder="Optional details..."></textarea>
+                </div>
+                <p id="editLocationError" class="team-modal-error" style="display: none;"></p>
+            </div>
+            <div class="modal-footer">
+                <button id="cancelEditLocation" class="btn btn-secondary">Cancel</button>
+                <button id="saveEditLocation" class="btn btn-success">
+                    <i class="fas fa-save"></i> Save Changes
                 </button>
             </div>
         </div>
