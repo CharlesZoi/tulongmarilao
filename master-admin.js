@@ -669,12 +669,16 @@ async function loadDonationLogs() {
                     donationLogs.push(data);
                 });
 
+                updateStats();
+                applyFilters();
                 renderDonationLogs();
                 renderSupportedLocationsTable();
             },
             (error) => {
                 console.error('Error loading donation logs:', error);
                 donationLogs = [];
+                updateStats();
+                applyFilters();
                 renderDonationLogs();
                 renderSupportedLocationsTable();
                 showError('Failed to load donation logs. Please refresh the page.');
@@ -683,6 +687,8 @@ async function loadDonationLogs() {
     } catch (error) {
         console.error('Error setting up donation log listener:', error);
         donationLogs = [];
+        updateStats();
+        applyFilters();
         renderDonationLogs();
         renderSupportedLocationsTable();
         showError('Failed to load donation logs. Please check your connection and refresh.');
@@ -1501,7 +1507,7 @@ function updateStats() {
     const critical = allLocations.filter(loc => loc.urgencyLevel === 'critical').length;
     const urgent = allLocations.filter(loc => loc.urgencyLevel === 'urgent').length;
     const moderate = allLocations.filter(loc => loc.urgencyLevel === 'moderate').length;
-    const reached = allLocations.filter(loc => loc.reached).length;
+    const reached = allLocations.filter(loc => isLocationReachedEffective(loc)).length;
     const total = allLocations.length;
 
     document.getElementById('criticalCount').textContent = critical;
@@ -1538,7 +1544,7 @@ function applyFilters() {
         const matchesUrgency = urgencyFilter === 'all' || location.urgencyLevel === urgencyFilter;
 
         // Reached filter
-        const isReached = location.reached || false;
+        const isReached = isLocationReachedEffective(location);
         const matchesReached = reachedFilter === 'all' ||
             (reachedFilter === 'reached' && isReached) ||
             (reachedFilter === 'not-reached' && !isReached);
@@ -1548,8 +1554,8 @@ function applyFilters() {
 
     // Sort locations - ALWAYS put reached locations at top first
     filteredLocations.sort((a, b) => {
-        const aReached = a.reached || false;
-        const bReached = b.reached || false;
+        const aReached = isLocationReachedEffective(a);
+        const bReached = isLocationReachedEffective(b);
 
         // Primary sort: Reached status (reached items first)
         if (aReached !== bReached) {
@@ -1773,6 +1779,21 @@ function donationLogBelongsToLocation(log, location) {
     return false;
 }
 
+function isLocationReachedEffective(location) {
+    if (!location || typeof location !== 'object') {
+        return false;
+    }
+
+    if (location.reached === true) {
+        return true;
+    }
+
+    return Array.isArray(donationLogs) && donationLogs.some((log) => (
+        normalizeDonationStatus(log.verificationStatus) === 'approved' &&
+        donationLogBelongsToLocation(log, location)
+    ));
+}
+
 function hasApprovedDonationProofForLocation(firestoreId) {
     const location = findLocationByAnyId(firestoreId);
     if (!location) {
@@ -1805,7 +1826,7 @@ function renderTable() {
         const date = new Date(location.reportedAt).toLocaleString();
         const reliefNeeds = Array.isArray(location.reliefNeeds) ? location.reliefNeeds.join(', ') : 'N/A';
         const reporter = location.reporterName || 'Anonymous';
-        const isReached = location.reached || false;
+        const isReached = isLocationReachedEffective(location);
         const latitude = Array.isArray(location.coords) ? Number(location.coords[0]) : Number.NaN;
         const longitude = Array.isArray(location.coords) ? Number(location.coords[1]) : Number.NaN;
         const coordsLabel = Number.isFinite(latitude) && Number.isFinite(longitude)
@@ -1860,7 +1881,7 @@ function getLocationResponseStatus(location) {
         };
     }
 
-    const isReached = location.reached === true;
+    const isReached = isLocationReachedEffective(location);
     const respondingName = [
         location.donorResponding,
         location.respondingTeam,
