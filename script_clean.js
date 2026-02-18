@@ -1046,13 +1046,198 @@ function initFirebase() {
     }
 }
 
+const DONATION_INLINE_IMAGES_MAX_BYTES = 850 * 1024;
+
+function estimateDataUrlBytes(dataUrl) {
+    if (typeof dataUrl !== 'string' || dataUrl.length === 0) {
+        return 0;
+    }
+
+    const base64Part = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+    if (!base64Part) {
+        return 0;
+    }
+
+    return Math.round(base64Part.length * 0.75);
+}
+
+function getDonationImagesTotalBytes(images) {
+    if (!Array.isArray(images) || images.length === 0) {
+        return 0;
+    }
+
+    return images.reduce((total, image) => {
+        if (!image || typeof image !== 'object') {
+            return total;
+        }
+        return total + estimateDataUrlBytes(image.data);
+    }, 0);
+}
+
+function createPinnedLocationId() {
+    const random4 = Math.floor(1000 + Math.random() * 9000);
+    return `pinned_${Date.now()}_${random4}`;
+}
+
+function resolveDonationActorId(candidateId = '') {
+    if (typeof candidateId === 'string' && candidateId.trim()) {
+        return candidateId.trim();
+    }
+
+    if (window.getCurrentUserId) {
+        const fallbackId = window.getCurrentUserId();
+        if (typeof fallbackId === 'string' && fallbackId.trim()) {
+            return fallbackId.trim();
+        }
+    }
+
+    let localId = localStorage.getItem('localUserId');
+    if (!localId) {
+        localId = `local_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+        localStorage.setItem('localUserId', localId);
+    }
+    return localId;
+}
+
+function normalizeDonationLogPayload(donationLog) {
+    const baseLog = donationLog && typeof donationLog === 'object' ? donationLog : {};
+    const baseLocation = baseLog.location && typeof baseLog.location === 'object' ? baseLog.location : {};
+    const baseLocationType = (baseLocation.type || '').toString().toLowerCase();
+
+    let locationId = '';
+    if (typeof baseLog.locationId === 'string' && baseLog.locationId.trim()) {
+        locationId = baseLog.locationId.trim();
+    } else if (typeof baseLocation.id === 'string' && baseLocation.id.trim()) {
+        locationId = baseLocation.id.trim();
+    } else if (baseLocationType === 'pinned') {
+        locationId = createPinnedLocationId();
+    }
+
+    const donorIdentity = resolveDonationActorId(baseLog.donorId || baseLog.createdBy || baseLog.userId);
+    const parsedSubmittedAtIso = new Date(baseLog.submittedAtIso || baseLog.submittedAt || Date.now());
+    const submittedAtIso = Number.isNaN(parsedSubmittedAtIso.getTime())
+        ? new Date().toISOString()
+        : parsedSubmittedAtIso.toISOString();
+
+    const normalizedLocationType = baseLocationType || (locationId.startsWith('pinned_') ? 'pinned' : 'supported');
+    const normalizedLocationName = (baseLocation.name || '').toString().trim() ||
+        (baseLog.locationName || '').toString().trim() ||
+        (normalizedLocationType === 'pinned' ? 'Pinned location' : 'Selected location');
+    const normalizedCoords = Array.isArray(baseLocation.coords) ? baseLocation.coords : null;
+
+    return {
+        ...baseLog,
+        donorId: donorIdentity,
+        createdBy: donorIdentity,
+        userId: donorIdentity,
+        locationId,
+        submittedAtIso,
+        location: {
+            ...baseLocation,
+            type: normalizedLocationType,
+            id: locationId,
+            name: normalizedLocationName,
+            coords: normalizedCoords
+        }
+    };
+}
+
+function validateDonationLogPayload(donationLog) {
+    if (!donationLog || typeof donationLog !== 'object') {
+        return { isValid: false, message: 'Donation log payload is missing.' };
+    }
+
+    if (!donationLog.locationId || typeof donationLog.locationId !== 'string') {
+        return { isValid: false, message: 'Drop-off location ID is missing. Please reselect the location.' };
+    }
+
+    const actorId = resolveDonationActorId(donationLog.createdBy || donationLog.userId || donationLog.donorId);
+    if (!actorId || typeof actorId !== 'string') {
+        return { isValid: false, message: 'Donor identity could not be verified. Please try again.' };
+    }
+
+    if (!donationLog.submittedAtIso || Number.isNaN(new Date(donationLog.submittedAtIso).getTime())) {
+        return { isValid: false, message: 'Submission timestamp is invalid. Please try again.' };
+    }
+
+    const location = donationLog.location;
+    if (!location || typeof location !== 'object') {
+        return { isValid: false, message: 'Drop-off location details are missing.' };
+    }
+
+    const locationName = (location.name || '').toString().trim();
+    if (!locationName) {
+        return { isValid: false, message: 'Drop-off location name is missing.' };
+    }
+
+    if (location.coords !== null && location.coords !== undefined) {
+        if (!Array.isArray(location.coords) || location.coords.length !== 2) {
+            return { isValid: false, message: 'Drop-off coordinates are invalid. Please reselect the location.' };
+        }
+
+        const [lat, lng] = location.coords;
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+            return { isValid: false, message: 'Drop-off coordinates are invalid. Please reselect the location.' };
+        }
+    }
+
+    const images = Array.isArray(donationLog.images) ? donationLog.images : [];
+    if (images.length < 2) {
+        return { isValid: false, message: 'Please upload at least 2 photos for verification.' };
+    }
+
+    const totalImageBytes = getDonationImagesTotalBytes(images);
+    if (totalImageBytes > DONATION_INLINE_IMAGES_MAX_BYTES) {
+        const totalKb = Math.round(totalImageBytes / 1024);
+        const limitKb = Math.round(DONATION_INLINE_IMAGES_MAX_BYTES / 1024);
+        return {
+            isValid: false,
+            message: `Uploaded photos are too large (${totalKb} KB total). Reduce photo size/count to below ${limitKb} KB and try again.`
+        };
+    }
+
+    return { isValid: true, estimatedImageBytes: totalImageBytes };
+}
+
+function getDonationSubmitErrorMessage(error) {
+    const code = (error && error.code ? String(error.code) : '').toLowerCase();
+
+    if (code.includes('permission-denied')) {
+        return 'Submission blocked by database permissions.';
+    }
+    if (code.includes('resource-exhausted')) {
+        return 'Photos are too large for submission. Reduce photo size/count and try again.';
+    }
+    if (code.includes('unavailable')) {
+        return 'Network/database temporarily unavailable. Please try again shortly.';
+    }
+    if (code.includes('invalid-donation-log')) {
+        return error && error.message ? error.message : 'Donation log details are invalid. Please review your input.';
+    }
+
+    return 'Failed to submit donation log. Please try again.';
+}
+
 async function saveDonationLogToFirestore(donationLog) {
     if (!db) {
         throw new Error('Firestore not initialized');
     }
 
-    const { addDoc, collection } = await import('https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js');
-    const docRef = await addDoc(collection(db, 'donation-logs'), donationLog);
+    const normalizedDonationLog = normalizeDonationLogPayload(donationLog);
+    const validationResult = validateDonationLogPayload(normalizedDonationLog);
+    if (!validationResult.isValid) {
+        const validationError = new Error(validationResult.message || 'Invalid donation log payload.');
+        validationError.code = 'invalid-donation-log';
+        throw validationError;
+    }
+
+    const { addDoc, collection, serverTimestamp } = await import('https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js');
+    const payloadToSave = {
+        ...normalizedDonationLog,
+        submittedAt: serverTimestamp()
+    };
+
+    const docRef = await addDoc(collection(db, 'donation-logs'), payloadToSave);
     return docRef.id;
 }
 
@@ -1170,6 +1355,7 @@ async function loadLocationsFromFirestore() {
         querySnapshot.forEach((doc) => {
             const data = doc.data();
             data.firestoreId = doc.id; // Store Firestore document ID
+            normalizeReportData(data);
             userReportedLocations.push(data);
 
             // Cache images for this location if they exist
@@ -1211,6 +1397,89 @@ async function deleteLocationFromFirestore(firestoreId) {
         }
 
         return false;
+    }
+}
+
+function getReportUrgency(report) {
+    const rawUrgency = report && (report.urgency || report.urgencyLevel)
+        ? String(report.urgency || report.urgencyLevel).trim().toLowerCase()
+        : '';
+
+    if (rawUrgency === 'critical' || rawUrgency === 'urgent' || rawUrgency === 'moderate') {
+        return rawUrgency;
+    }
+
+    return 'moderate';
+}
+
+function normalizeReportData(report) {
+    if (!report || typeof report !== 'object') {
+        return report;
+    }
+
+    const normalizedUrgency = getReportUrgency(report);
+    report.urgency = normalizedUrgency;
+    report.urgencyLevel = normalizedUrgency;
+
+    if (!Array.isArray(report.reliefNeeds)) {
+        if (typeof report.reliefNeeds === 'string' && report.reliefNeeds.trim()) {
+            report.reliefNeeds = report.reliefNeeds
+                .split(',')
+                .map(need => need.trim())
+                .filter(Boolean);
+        } else {
+            report.reliefNeeds = [];
+        }
+    }
+
+    return report;
+}
+
+function resolveRealtimeDatabaseUrl() {
+    const fromEnv = (window.env && window.env.FIREBASE_DATABASE_URL) || '';
+    if (!fromEnv) {
+        return '';
+    }
+    return String(fromEnv).replace(/\/+$/, '');
+}
+
+async function pushRealtimeAlert(report, reportId) {
+    const realtimeDbUrl = resolveRealtimeDatabaseUrl();
+    if (!realtimeDbUrl || !report) {
+        return;
+    }
+
+    const severity = getReportUrgency(report);
+    const payload = {
+        reportId: reportId || report.firestoreId || report.id || `local_${Date.now()}`,
+        severity,
+        urgency: severity,
+        urgencyLevel: severity,
+        timestamp: Date.now(),
+        pushedAt: new Date().toISOString()
+    };
+
+    let requestUrl = `${realtimeDbUrl}/deviceAlerts/latest.json`;
+
+    if (window.firebaseAuth && window.firebaseAuth.currentUser) {
+        try {
+            const idToken = await window.firebaseAuth.currentUser.getIdToken();
+            if (idToken) {
+                requestUrl += `?auth=${encodeURIComponent(idToken)}`;
+            }
+        } catch (tokenError) {
+            console.warn('Could not fetch auth token for RTDB alert push:', tokenError);
+        }
+    }
+
+    try {
+        await fetch(requestUrl, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+    } catch (error) {
+        console.warn('Failed to push device alert to Realtime Database:', error);
     }
 }
 
@@ -1267,6 +1536,7 @@ async function setupRealtimeListener() {
                 if (change.type === 'added') {
                     const data = change.doc.data();
                     data.firestoreId = change.doc.id;
+                    normalizeReportData(data);
 
                     // Check if this location is already in our local array
                     const exists = userReportedLocations.some(loc =>
@@ -1290,6 +1560,7 @@ async function setupRealtimeListener() {
                     if (index > -1) {
                         const data = change.doc.data();
                         data.firestoreId = modifiedId;
+                        normalizeReportData(data);
 
                         // Remove old marker and add updated one
                         markerUpdateQueue.push({ type: 'remove', coords: userReportedLocations[index].coords });
@@ -4884,6 +5155,14 @@ async function submitDonationLog(event) {
         return;
     }
 
+    const totalImageBytes = getDonationImagesTotalBytes(donationUploadedImages);
+    if (totalImageBytes > DONATION_INLINE_IMAGES_MAX_BYTES) {
+        const totalKb = Math.round(totalImageBytes / 1024);
+        const limitKb = Math.round(DONATION_INLINE_IMAGES_MAX_BYTES / 1024);
+        systemAlert(`Uploaded photos are too large (${totalKb} KB total). Reduce photo size/count to below ${limitKb} KB and try again.`);
+        return;
+    }
+
     const donationItems = [];
     const itemRows = document.querySelectorAll('#donationItems .donation-item-row');
     itemRows.forEach((row) => {
@@ -4920,9 +5199,10 @@ async function submitDonationLog(event) {
     const donorEmail = window.firebaseAuth && window.firebaseAuth.currentUser
         ? window.firebaseAuth.currentUser.email
         : null;
-    const donorId = window.firebaseAuth && window.firebaseAuth.currentUser
+    const donorIdCandidate = window.firebaseAuth && window.firebaseAuth.currentUser
         ? window.firebaseAuth.currentUser.uid
         : (window.getCurrentUserId ? window.getCurrentUserId() : null);
+    const donorId = resolveDonationActorId(donorIdCandidate);
 
     if (donorName) {
         if (donorType === 'organization') {
@@ -4949,17 +5229,21 @@ async function submitDonationLog(event) {
         }
     } else {
         locationType = 'pinned';
+        locationId = createPinnedLocationId();
         locationName = donationPinLabel || 'Pinned location';
         locationCoords = donationPinCoords ? [donationPinCoords.lat, donationPinCoords.lng] : null;
     }
 
-    const donationLog = {
+    const donationLogPayload = {
         id: `donation_${Date.now()}`,
         donorId,
+        createdBy: donorId,
+        userId: donorId,
         donorName,
         donorType,
         donorEmail,
-        submittedAt: new Date().toISOString(),
+        locationId,
+        submittedAtIso: new Date().toISOString(),
         location: {
             type: locationType,
             id: locationId,
@@ -4981,6 +5265,13 @@ async function submitDonationLog(event) {
         verifiedBy: null
     };
 
+    const normalizedDonationLog = normalizeDonationLogPayload(donationLogPayload);
+    const payloadValidation = validateDonationLogPayload(normalizedDonationLog);
+    if (!payloadValidation.isValid) {
+        systemAlert(payloadValidation.message || 'Donation log details are invalid. Please review your input.');
+        return;
+    }
+
     const submitButton = event.target.querySelector('button[type="submit"]');
     if (submitButton) {
         submitButton.disabled = true;
@@ -4993,21 +5284,33 @@ async function submitDonationLog(event) {
             return;
         }
 
-        await saveDonationLogToFirestore(donationLog);
+        await saveDonationLogToFirestore(normalizedDonationLog);
         addGuestActivity({
             type: 'donation',
-            locationId,
-            locationName,
-            donorName,
-            donorType,
+            locationId: normalizedDonationLog.locationId,
+            locationName: normalizedDonationLog.location && normalizedDonationLog.location.name
+                ? normalizedDonationLog.location.name
+                : locationName,
+            donorName: normalizedDonationLog.donorName,
+            donorType: normalizedDonationLog.donorType,
             itemCount: donationItems.length,
             cashAmount
         });
         showSuccessMessage('Donation log submitted for verification.');
         closeDonationLogModal();
     } catch (error) {
-        console.error('Error submitting donation log:', error);
-        systemAlert('Failed to submit donation log. Please try again.');
+        const errorContext = {
+            code: error && error.code ? error.code : 'unknown',
+            message: error && error.message ? error.message : 'unknown',
+            locationId: normalizedDonationLog.locationId,
+            donorId: normalizedDonationLog.donorId,
+            donorType: normalizedDonationLog.donorType,
+            imageCount: Array.isArray(normalizedDonationLog.images) ? normalizedDonationLog.images.length : 0,
+            estimatedImageBytes: getDonationImagesTotalBytes(normalizedDonationLog.images),
+            hasFirestoreDb: !!db
+        };
+        console.error('Error submitting donation log:', errorContext, error);
+        systemAlert(getDonationSubmitErrorMessage(error));
     } finally {
         if (submitButton) {
             submitButton.disabled = false;
@@ -5160,6 +5463,7 @@ async function submitLocationReport(e) {
                 };
             })
         };
+        normalizeReportData(userReport);
 
         let savedId = null;
         let saveMethod = 'unknown';
@@ -5192,6 +5496,9 @@ async function submitLocationReport(e) {
         if (savedId) {
             userReport.firestoreId = savedId;
         }
+
+        // Optional hardware alert bridge: push latest report severity to RTDB for IoT devices.
+        void pushRealtimeAlert(userReport, userReport.firestoreId || userReport.id);
 
         const alreadyTracked = userReportedLocations.some(location =>
             (userReport.firestoreId && location.firestoreId === userReport.firestoreId) ||
@@ -5252,7 +5559,7 @@ async function submitLocationReport(e) {
 function addUserReportedMarker(report) {
     // Check if marker should be displayed based on current filter
     const matchesUrgency = currentUrgencyFilter === 'all' ||
-        report.urgency === currentUrgencyFilter;
+        getReportUrgency(report) === currentUrgencyFilter;
 
     const isReached = report.reached === true;
     const matchesReached = isReachedViewActive ? isReached : !isReached;
@@ -5309,7 +5616,7 @@ function getResponseStatusData(report) {
 }
 
 function createUserReportPopup(report) {
-    const urgencyValue = report.urgency || report.urgencyLevel || 'moderate';
+    const urgencyValue = getReportUrgency(report);
     const urgencyBadge = `<span class="status-badge" style="background-color: ${getUrgencyColor(urgencyValue)}; color: white;">${urgencyValue.toUpperCase()}</span>`;
     const sourceBadge = `<span class="relief-badge relief-needs-help">${(report.source || 'unknown').toUpperCase()}</span>`;
 
@@ -6035,7 +6342,7 @@ function updateDonorDashboardOverview() {
             .filter(item => !item.isReached && !item.isOnTheWay)
             .map(item => item.location)
             .filter(location => matchesDonorSearch(location, query))
-            .filter(location => urgencyFilter === 'all' || location.urgency === urgencyFilter);
+            .filter(location => urgencyFilter === 'all' || getReportUrgency(location) === urgencyFilter);
 
         renderDonorLocationList(unreachedList, filteredUnreached, {
             emptyMessage: 'Unreached locations will appear here once loaded.',
@@ -6151,10 +6458,9 @@ function buildDonorLocationCard(location, options) {
     }
 
     const locationName = escapeHtml((location.locationName || 'Unnamed location').toString());
-    const urgencyText = location.urgency
-        ? location.urgency.charAt(0).toUpperCase() + location.urgency.slice(1)
-        : 'Unknown';
-    const urgencyColor = getUrgencyColor(location.urgency || '');
+    const urgencyValue = getReportUrgency(location);
+    const urgencyText = urgencyValue.charAt(0).toUpperCase() + urgencyValue.slice(1);
+    const urgencyColor = getUrgencyColor(urgencyValue);
     const reportedDate = location.reportedAt ? new Date(location.reportedAt).toLocaleDateString() : '';
     const needs = Array.isArray(location.reliefNeeds)
         ? location.reliefNeeds.filter(Boolean).map(need => escapeHtml(String(need))).join(', ')
@@ -6273,7 +6579,7 @@ function prepareFilteredLocations() {
 
         // Urgency filter
         const matchesUrgency = currentUrgencyFilter === 'all' ||
-            location.urgency === currentUrgencyFilter;
+            getReportUrgency(location) === currentUrgencyFilter;
 
         return matchesSearch && matchesUrgency;
     });
@@ -6281,8 +6587,8 @@ function prepareFilteredLocations() {
     // Sort filtered locations by urgency and date
     allFilteredLocations.sort((a, b) => {
         const urgencyOrder = { 'critical': 3, 'urgent': 2, 'moderate': 1 };
-        const urgencyA = urgencyOrder[a.urgency] || 0;
-        const urgencyB = urgencyOrder[b.urgency] || 0;
+        const urgencyA = urgencyOrder[getReportUrgency(a)] || 0;
+        const urgencyB = urgencyOrder[getReportUrgency(b)] || 0;
 
         if (urgencyA !== urgencyB) {
             return urgencyB - urgencyA; // Higher urgency first
@@ -6358,10 +6664,9 @@ function loadMorePinnedLocations() {
 }
 
 function createPinnedLocationItem(location, index) {
-    const urgencyColor = getUrgencyColor(location.urgency);
-    const urgencyText = location.urgency
-        ? location.urgency.charAt(0).toUpperCase() + location.urgency.slice(1)
-        : 'Unknown';
+    const urgencyValue = getReportUrgency(location);
+    const urgencyColor = getUrgencyColor(urgencyValue);
+    const urgencyText = urgencyValue.charAt(0).toUpperCase() + urgencyValue.slice(1);
 
     const listItem = document.createElement('div');
     listItem.className = 'pinned-item';
@@ -6553,7 +6858,7 @@ function filterMapMarkers() {
     userReportedLocations.forEach(report => {
         // Check urgency filter
         const matchesUrgency = currentUrgencyFilter === 'all' ||
-            report.urgencyLevel === currentUrgencyFilter;
+            getReportUrgency(report) === currentUrgencyFilter;
 
         // Check search filter
         const peopleCountMatch =
@@ -7181,7 +7486,7 @@ function addUserReportedMarkerToMap(report) {
     const isOnTheWay = statusData.isOnTheWay;
     const markerColor = isReached
         ? '#28a745'
-        : (isOnTheWay ? '#1d4ed8' : getUrgencyColor(report.urgencyLevel));
+        : (isOnTheWay ? '#1d4ed8' : getUrgencyColor(getReportUrgency(report)));
     const badgeText = isReached ? '✓' : (isOnTheWay ? 'O' : 'U');
     const badgeColor = isReached ? '#28a745' : (isOnTheWay ? '#1d4ed8' : '#17a2b8');
 

@@ -22,6 +22,28 @@ service cloud.firestore {
       ]);
     }
 
+    function hasDonationIdentity(data) {
+      return data.createdBy is string ||
+             data.userId is string ||
+             data.donorId is string;
+    }
+
+    function donationIdentityMatchesAuth(data) {
+      return data.createdBy == request.auth.uid ||
+             data.userId == request.auth.uid ||
+             data.donorId == request.auth.uid;
+    }
+
+    function hasDonationLocationId(data) {
+      return data.locationId is string ||
+             (data.location is map && data.location.id is string);
+    }
+
+    function hasDonationSubmittedAt(data) {
+      return data.submittedAt is timestamp ||
+             data.submittedAt is string;
+    }
+
     match /relief-locations/{locationId} {
       allow read: if true;
 
@@ -85,17 +107,14 @@ service cloud.firestore {
       allow create: if (
         // Authenticated user - must match their uid
         (request.auth != null &&
-          (request.resource.data.createdBy == request.auth.uid ||
-           request.resource.data.userId == request.auth.uid ||
-           request.resource.data.donorId == request.auth.uid)) ||
+          hasDonationIdentity(request.resource.data) &&
+          donationIdentityMatchesAuth(request.resource.data)) ||
         // Anonymous user - allow any createdBy/userId value for public access
         (request.auth == null &&
-          (request.resource.data.createdBy is string ||
-           request.resource.data.userId is string ||
-           request.resource.data.donorId is string))
+          hasDonationIdentity(request.resource.data))
       ) &&
-        request.resource.data.locationId is string &&
-        request.resource.data.submittedAt is timestamp;
+        hasDonationLocationId(request.resource.data) &&
+        hasDonationSubmittedAt(request.resource.data);
 
       allow update: if isMasterAdmin() ||
         (request.auth != null &&
